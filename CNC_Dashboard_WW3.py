@@ -555,10 +555,13 @@ def render_writer_pen(writers_df):
 if 'print_mode' not in st.session_state:
     st.session_state['print_mode'] = False
 
-# 인쇄 모드 전용 스타일 (페이지 강제 나눔 제거 + 80% 축소 유지)
+# =================================================================
+# ▼ 인쇄 모드 전용 스타일 (수정됨: 공백 제거 및 연속 출력 최적화) ▼
+# =================================================================
+
 PRINT_CSS = """
 <style>
-/* 화면에서는 인쇄 모드일 때 컨텐츠를 80%로 축소해서 보여줌 */
+/* 1. 화면 미리보기용 (85% 축소) */
 .print-preview-layout {
     transform: scale(0.85); 
     transform-origin: top center; 
@@ -566,47 +569,63 @@ PRINT_CSS = """
 }
 
 @media print {
+    /* 2. 페이지 설정 */
     @page { 
         size: A4; 
-        margin: 10mm; 
-    }
-    body { 
-        transform: scale(0.8) !important; 
-        transform-origin: top left !important; 
-        width: 125% !important;
+        margin: 5mm 10mm 5mm 10mm; /* 상하 여백을 확 줄임 */
     }
     
-    /* 불필요한 요소 숨김 */
+    body { 
+        transform: scale(0.75) !important; /* 배율을 75%로 조금 더 줄여서 한 페이지에 많이 담기 */
+        transform-origin: top left !important; 
+        width: 133% !important; /* 100 / 0.75 */
+    }
+    
+    /* 3. 숨김 처리 */
     .no-print, .stButton, header, footer, [data-testid="stSidebar"] { display: none !important; }
     
-    /* [핵심 수정] 섹션마다 페이지 넘김(break-before)을 제거하여 공란 없이 이어서 출력 */
-    .section-header-container { 
-        break-before: auto !important; /* 강제 페이지 넘김 해제 */
-        break-after: avoid !important; /* 헤더 바로 뒤에서 페이지가 끊기지 않도록 설정 */
-        margin-top: 50px !important;   /* 섹션 간 간격만 적당히 줌 */
-        border-top: 1px dashed #ccc;   /* 섹션 구분을 위한 가벼운 점선 (선택사항) */
-        padding-top: 20px;
+    /* 4. Streamlit 기본 간격(Gap) 강제 삭제 (가장 중요) */
+    .block-container {
+        padding-top: 0 !important;
+        padding-bottom: 0 !important;
+    }
+    [data-testid="stVerticalBlock"] {
+        gap: 0.5rem !important; /* 블록 간격을 최소화 */
     }
     
-    /* 첫 번째 섹션은 위쪽 간격/선 없음 */
-    .first-section { 
-        margin-top: 0 !important; 
-        border-top: none !important; 
+    /* 5. 섹션 헤더 스타일 */
+    .section-header-container { 
+        break-before: auto !important; /* 강제 페이지 넘김 절대 금지 */
+        break-inside: avoid !important; /* 제목 달랑 혼자 남는 것 방지 */
+        margin-top: 20px !important;    /* 간격 최소화 */
+        padding-top: 10px !important;
+        border-top: 1px solid #eee;     /* 구분선 얇게 */
+    }
+    
+    .first-section { margin-top: 0 !important; border-top: none !important; }
+
+    /* 6. 내용물 자르기 규칙 완화 */
+    /* 차트나 표는 자르지 않되(avoid), 너무 공간을 차지하면 여백을 줄임 */
+    .stPlotlyChart, [data-testid="stDataFrame"], .kpi-container {
+        break-inside: avoid !important; 
+        margin-bottom: 10px !important;
+    }
+    
+    /* 텍스트 설명 등은 자연스럽게 잘려서 넘어가게 허용 */
+    .section-desc, p, span {
+        break-inside: auto !important;
     }
 
-    /* 차트나 표가 페이지 끝에서 반으로 뚝 잘리는 것을 방지 */
-    .stPlotlyChart, [data-testid="stDataFrame"], .kpi-container {
-        break-inside: avoid !important;
-    }
-    
-    /* 인쇄용 푸터 */
+    /* 7. 인쇄용 푸터 */
     .print-footer {
         position: fixed;
         bottom: 0;
+        left: 0;
         width: 100%;
         text-align: center;
-        font-size: 10px;
-        color: #999;
+        font-size: 8px;
+        color: #bbb;
+        background: white;
     }
 }
 </style>
