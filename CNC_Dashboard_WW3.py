@@ -6,9 +6,9 @@ import plotly.graph_objects as go
 import numpy as np
 import requests
 import re
+import concurrent.futures # 병렬 처리를 위한 모듈
 from bs4 import BeautifulSoup
 from datetime import datetime, timedelta
-import concurrent.futures # 병렬 처리를 위한 모듈
 
 # 인증 모듈
 from google.oauth2 import service_account 
@@ -255,37 +255,7 @@ def load_all_dashboard_data(selected_week):
         df_daily = df_daily.rename(columns={'date':'날짜', 'activeUsers':'UV', 'screenPageViews':'PV'})
         df_daily['날짜'] = pd.to_datetime(df_daily['날짜']).dt.strftime('%m-%d')
     
-    # 3. [속도 개선] 3개월 추이 - 반복문 제거하고 한 번에 호출 후 그룹핑
-    # 12주 전 날짜 계산
-    start_of_trend = (datetime.strptime(s_dt, '%Y-%m-%d') - timedelta(weeks=12)).strftime('%Y-%m-%d')
-    df_trend_raw = run_ga4_report(start_of_trend, e_dt, ["date"], ["activeUsers", "screenPageViews"])
-    
-    weekly_list = []
-    if not df_trend_raw.empty:
-        df_trend_raw['date'] = pd.to_datetime(df_trend_raw['date'])
-        # 해당 날짜가 속한 주의 정보 매핑
-        week_keys = list(WEEK_MAP.keys())
-        
-        # 각 주차별로 데이터 집계
-        for wl, dstr in week_keys[::-1]: # 최근부터 과거로 역순인 MAP을 순회
-            ws_str, we_str = dstr.split(' ~ ')
-            ws = datetime.strptime(ws_str, '%Y.%m.%d')
-            we = datetime.strptime(we_str, '%Y.%m.%d')
-            
-            # 해당 주차 기간에 해당하는 데이터 필터링
-            mask = (df_trend_raw['date'] >= ws) & (df_trend_raw['date'] <= we)
-            week_data = df_trend_raw[mask]
-            
-            if not week_data.empty:
-                uv = int(week_data['activeUsers'].sum()) # UV는 단순 합산이 아니지만 추이용 근사치로 사용하거나, 정확성을 위해 별도 쿼리 필요시 유지. 여기선 속도 위해 합산(또는 Max)
-                # GA4 API 특성상 UV는 기간별 Unique라 합산 시 중복이 발생함. 
-                # 하지만 속도를 위해 트렌드용으로는 '일별 UV의 합'을 사용하거나, 
-                # 정확도를 위해 여기서만 12번 루프를 돌리는 방법이 있음. 
-                # 쿡앤셰프의 요청사항은 "속도 개선"이므로, 트렌드는 일별 단순 PV 합산, UV는 근사치로 처리하겠습니다.
-                # (정확한 주간 UV를 원하면 병렬처리를 해야 함 -> 아래 로직 적용)
-                pass 
-    
-    # [속도 개선 보완] 주간 UV의 정확도를 위해 병렬 요청으로 변경
+    # 3. [속도 개선] 3개월 추이 병렬 처리
     def fetch_week_data(week_label, date_str):
         ws, we = date_str.split(' ~ ')[0].replace('.', '-'), date_str.split(' ~ ')[1].replace('.', '-')
         res = run_ga4_report(ws, we, [], ["activeUsers", "screenPageViews"])
@@ -298,9 +268,10 @@ def load_all_dashboard_data(selected_week):
             }
         return None
 
-    # ThreadPoolExecutor를 사용한 병렬 요청 (12주치)
+    # ThreadPoolExecutor를 사용한 병렬 요청 (최근 12주치)
+    # [수정 완료] ValueError 해결을 위해 .items() 명시적으로 사용
     with concurrent.futures.ThreadPoolExecutor(max_workers=5) as executor:
-        futures = [executor.submit(fetch_week_data, wl, dstr) for wl, dstr in list(WEEK_MAP.items())[:12]] # 최근 12개만
+        futures = [executor.submit(fetch_week_data, wl, dstr) for wl, dstr in list(WEEK_MAP.items())[:12]]
         results = [f.result() for f in concurrent.futures.as_completed(futures) if f.result()]
     
     # 주차 순서 정렬 (과거 -> 현재)
@@ -310,7 +281,7 @@ def load_all_dashboard_data(selected_week):
         df_weekly['week_num'] = df_weekly['주차'].apply(lambda x: int(re.search(r'\d+', x).group()))
         df_weekly = df_weekly.sort_values('week_num')
 
-    # 4. 유입경로 (기존 로직 유지)
+    # 4. 유입경로
     def map_source(s):
         s = s.lower()
         if 'naver' in s: return '네이버'
@@ -332,7 +303,7 @@ def load_all_dashboard_data(selected_week):
     df_tl_raw['유입경로'] = df_tl_raw['sessionSource'].apply(map_source)
     df_traffic_last = df_tl_raw.groupby('유입경로')['screenPageViews'].sum().reset_index().rename(columns={'screenPageViews':'조회수'})
 
-    # 5. 방문자 특성 (함수 내부화로 깔끔하게)
+    # 5. 방문자 특성 (병렬 처리)
     def clean_and_group(df, col_name):
         if df.empty: return pd.DataFrame(columns=['구분', 'activeUsers'])
         df['구분'] = df[col_name].replace({'(not set)': '기타', '': '기타', 'unknown': '기타'}).fillna('기타')
@@ -352,8 +323,8 @@ def load_all_dashboard_data(selected_week):
         # 결과 처리
         # Region
         d_rc, d_rl = f_reg_c.result(), f_reg_l.result()
-        d_rc['region_mapped'] = d_rc['region'].map(region_map).fillna('기타') if not d_rc.empty else []
-        d_rl['region_mapped'] = d_rl['region'].map(region_map).fillna('기타') if not d_rl.empty else []
+        if not d_rc.empty: d_rc['region_mapped'] = d_rc['region'].map(region_map).fillna('기타')
+        if not d_rl.empty: d_rl['region_mapped'] = d_rl['region'].map(region_map).fillna('기타')
         df_region_curr = clean_and_group(d_rc, 'region_mapped')
         df_region_last = clean_and_group(d_rl, 'region_mapped')
 
@@ -376,7 +347,7 @@ def load_all_dashboard_data(selected_week):
         df_gender_curr = d_gc.dropna(subset=['mapped']).groupby('구분', as_index=False)['activeUsers'].sum() if not d_gc.empty else pd.DataFrame()
         df_gender_last = d_gl.dropna(subset=['mapped']).groupby('구분', as_index=False)['activeUsers'].sum() if not d_gl.empty else pd.DataFrame()
 
-    # 6. TOP 10 및 크롤링 (병렬 처리 핵심 구간)
+    # 6. TOP 10 및 크롤링 (병렬 처리)
     df_raw_top = run_ga4_report(s_dt, e_dt, ["pageTitle", "pagePath"], ["screenPageViews", "activeUsers", "userEngagementDuration", "bounceRate"], "screenPageViews", limit=100)
     
     if not df_raw_top.empty:
