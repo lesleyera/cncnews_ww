@@ -26,16 +26,15 @@ st.set_page_config(
     initial_sidebar_state="collapsed"
 )
 
-# ----------------- 2. CSS 스타일 정의 -----------------
+# ----------------- 2. CSS 스타일 정의 (기본 + 인쇄) -----------------
 COLOR_NAVY = "#1a237e"
 COLOR_RED = "#d32f2f"
 COLOR_GREY = "#78909c"
 COLOR_BG_ACCENT = "#fffcf7"
 CHART_PALETTE = [COLOR_NAVY, COLOR_RED, "#5c6bc0", "#ef5350", "#8d6e63", COLOR_GREY]
 COLOR_GENDER = {'여성': '#d32f2f', '남성': '#1a237e'} 
-NOW_STR = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
 
-# 기본 스타일 (화면용)
+# 기본 화면 스타일
 CSS = f"""
 <style>
 @import url('https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.8/dist/web/static/pretendard.css');
@@ -65,18 +64,71 @@ header[data-testid="stHeader"] {{ visibility: hidden !important; }}
 .stTabs [aria-selected="true"] {{ background-color: #fff; color: {COLOR_RED}; border-bottom: 4px solid {COLOR_RED}; }}
 [data-testid="stDataFrame"] thead th {{ background-color: {COLOR_NAVY} !important; color: white !important; font-size: 1rem !important; font-weight: 600 !important; }}
 .footer-note {{ font-size: 0.85rem; color: #78909c; margin-top: 50px; border-top: 1px solid #eceff1; padding-top: 15px; text-align: center; }}
-
-/* 프린트 시 강제 적용 스타일 (백업용) */
-@media print {{
-    @page {{ size: A4; margin: 10mm; }}
-    header, footer, [data-testid="stSidebar"], [data-testid="stHeader"], .no-print {{ display: none !important; }}
-    .stTabs [data-baseweb="tab-list"] {{ display: none !important; }}
-    .section-header-container {{ break-before: page; margin-top: 20px !important; }}
-    .first-section {{ break-before: auto !important; }}
-}}
 </style>
 """
 st.markdown(CSS, unsafe_allow_html=True)
+
+# ----------------- 인쇄 모드 전용 스타일 (수정됨) -----------------
+PRINT_CSS = """
+<style>
+/* 1. 화면 미리보기용 (85% 축소) */
+.print-preview-layout {
+    transform: scale(0.85); 
+    transform-origin: top center; 
+    width: 117%;
+}
+
+@media print {
+    /* 2. 페이지 설정 (A4) */
+    @page { 
+        size: A4; 
+        margin: 10mm; 
+    }
+    
+    body { 
+        /* 요청하신 80% 배율 유지 */
+        transform: scale(0.8) !important; 
+        transform-origin: top left !important; 
+        width: 125% !important; /* 100/0.8 = 125 */
+    }
+    
+    /* 3. 숨김 처리 */
+    .no-print, .stButton, header, footer, [data-testid="stSidebar"] { display: none !important; }
+    
+    /* 4. 강제 페이지 넘김 클래스 정의 */
+    .page-break { 
+        page-break-before: always !important; 
+        break-before: page !important;
+        display: block;
+        height: 1px;
+        margin-top: 20px;
+    }
+    
+    /* 5. 표(DataFrame) 가로폭 100% 강제 확장 */
+    [data-testid="stDataFrame"] {
+        width: 100% !important;
+    }
+    [data-testid="stDataFrame"] > div {
+        width: 100% !important;
+    }
+    
+    /* 6. 섹션 헤더 및 여백 조정 */
+    .section-header-container { margin-top: 10px !important; }
+    .block-container { padding-top: 0 !important; }
+    
+    /* 7. 인쇄용 푸터 */
+    .print-footer {
+        position: fixed;
+        bottom: 0;
+        width: 100%;
+        text-align: center;
+        font-size: 10px;
+        color: #999;
+    }
+}
+</style>
+"""
+st.markdown(PRINT_CSS, unsafe_allow_html=True)
 
 # ----------------- 3. 진입 보안 화면 (로그인) -----------------
 def check_password():
@@ -407,36 +459,78 @@ def render_traffic(df_traffic_curr, df_traffic_last):
     df_m['비중 변화'] = (df_m['이번주 비중'] - df_m['지난주 비중']).round(1)
     st.dataframe(df_m[['유입경로', '이번주 비중', '지난주 비중', '비중 변화']].copy().assign(**{'비중 변화': lambda x: x['비중 변화'].apply(lambda v: f"{v:+.1f}%p")}), use_container_width=True, hide_index=True)
 
-def render_demographics(df_region_curr, df_region_last, df_age_curr, df_age_last, df_gender_curr, df_gender_last):
-    st.markdown('<div class="section-header-container"><div class="section-header">3. 주간 전체 방문자 특성 분석</div><div class="section-desc">주간 vs 직전주 비교 및 변화 추이</div></div>', unsafe_allow_html=True)
-    demo_cats = ['지역별', '연령별', '성별']
-    curr_data_list = [df_region_curr, df_age_curr, df_gender_curr]
-    last_data_list = [df_region_last, df_age_last, df_gender_last]
-    color_maps = [None, None, COLOR_GENDER] 
-    for i in range(3):
-        st.markdown(f"<div class='sub-header'>{demo_cats[i]} 분석</div>", unsafe_allow_html=True)
+# ----------------- [수정] 3번 섹션 분리 (지역 / 연령+성별) -----------------
+def render_demo_region(df_region_curr, df_region_last):
+    st.markdown('<div class="section-header-container"><div class="section-header">3. 주간 전체 방문자 특성 분석 (지역)</div></div>', unsafe_allow_html=True)
+    
+    # 지역별 분석
+    st.markdown("<div class='sub-header'>지역별 분석</div>", unsafe_allow_html=True)
+    c_curr, c_last = st.columns(2)
+    with c_curr:
+        st.markdown(f"**이번주**")
+        st.plotly_chart(create_donut_chart_with_val(df_region_curr, '구분', 'activeUsers', None), use_container_width=True)
+    with c_last:
+        st.markdown(f"**지난주 (비교)**")
+        st.plotly_chart(create_donut_chart_with_val(df_region_last, '구분', 'activeUsers', None), use_container_width=True)
+        
+    # 지역별 표
+    if not df_region_curr.empty and not df_region_last.empty:
+        df_change = pd.merge(df_region_curr, df_region_last, on='구분', suffixes=('_이번', '_지난'), how='left').fillna(0)
+        total_c = df_change['activeUsers_이번'].sum()
+        total_l = df_change['activeUsers_지난'].sum()
+        df_change['비율_이번'] = (df_change['activeUsers_이번'] / total_c * 100).round(1) if total_c > 0 else 0
+        df_change['비율_지난'] = (df_change['activeUsers_지난'] / total_l * 100).round(1) if total_l > 0 else 0
+        df_change['변화(%p)'] = df_change['비율_이번'] - df_change['비율_지난']
+        
+        df_norm = df_change[df_change['구분']!='기타'].sort_values('activeUsers_이번', ascending=False)
+        df_oth = df_change[df_change['구분']=='기타']
+        df_disp = pd.concat([df_norm, df_oth])
+        
+        df_disp['이번주(%)'] = df_disp['비율_이번'].astype(str) + '%'
+        df_disp['지난주(%)'] = df_disp['비율_지난'].astype(str) + '%'
+        df_disp['변화(%p)'] = df_disp['변화(%p)'].apply(lambda x: f"{x:+.1f}%p")
+        
+        st.dataframe(df_disp[['구분', '이번주(%)', '지난주(%)', '변화(%p)']], use_container_width=True, hide_index=True)
+
+def render_demo_age_gender(df_age_curr, df_age_last, df_gender_curr, df_gender_last):
+    st.markdown('<div class="section-header-container"><div class="section-header">3. 주간 전체 방문자 특성 분석 (연령/성별)</div></div>', unsafe_allow_html=True)
+    
+    # 연령/성별 루프
+    sub_titles = ['연령별', '성별']
+    curr_data = [df_age_curr, df_gender_curr]
+    last_data = [df_age_last, df_gender_last]
+    color_maps = [None, COLOR_GENDER]
+    
+    for i in range(2):
+        st.markdown(f"<div class='sub-header'>{sub_titles[i]} 분석</div>", unsafe_allow_html=True)
         c_curr, c_last = st.columns(2)
-        d_c = curr_data_list[i]
-        d_l = last_data_list[i]
+        d_c = curr_data[i]
+        d_l = last_data[i]
+        
         with c_curr:
             st.markdown(f"**이번주**")
             st.plotly_chart(create_donut_chart_with_val(d_c, '구분', 'activeUsers', color_maps[i]), use_container_width=True)
         with c_last:
             st.markdown(f"**지난주 (비교)**")
             st.plotly_chart(create_donut_chart_with_val(d_l, '구분', 'activeUsers', color_maps[i]), use_container_width=True)
+
         if not d_c.empty and not d_l.empty:
             df_change = pd.merge(d_c, d_l, on='구분', suffixes=('_이번', '_지난'), how='left').fillna(0)
-            total_c = df_change['activeUsers_이번'].sum(); total_l = df_change['activeUsers_지난'].sum()
+            total_c = df_change['activeUsers_이번'].sum()
+            total_l = df_change['activeUsers_지난'].sum()
             df_change['비율_이번'] = (df_change['activeUsers_이번'] / total_c * 100).round(1) if total_c > 0 else 0
             df_change['비율_지난'] = (df_change['activeUsers_지난'] / total_l * 100).round(1) if total_l > 0 else 0
             df_change['변화(%p)'] = df_change['비율_이번'] - df_change['비율_지난']
+            
             df_norm = df_change[df_change['구분']!='기타'].sort_values('activeUsers_이번', ascending=False)
             df_oth = df_change[df_change['구분']=='기타']
             df_disp = pd.concat([df_norm, df_oth])
-            df_disp['이번주(%)'] = df_disp['비율_이번'].astype(str) + '%'; df_disp['지난주(%)'] = df_disp['비율_지난'].astype(str) + '%'
+            
+            df_disp['이번주(%)'] = df_disp['비율_이번'].astype(str) + '%'
+            df_disp['지난주(%)'] = df_disp['비율_지난'].astype(str) + '%'
             df_disp['변화(%p)'] = df_disp['변화(%p)'].apply(lambda x: f"{x:+.1f}%p")
+            
             st.dataframe(df_disp[['구분', '이번주(%)', '지난주(%)', '변화(%p)']], use_container_width=True, hide_index=True)
-        else: st.warning("데이터 부족")
         st.markdown("<hr>", unsafe_allow_html=True)
 
 def render_top10_detail(df_top10):
@@ -547,92 +641,13 @@ def render_writer_pen(writers_df):
             st.dataframe(disp_w, use_container_width=True, hide_index=True)
         else: st.info("필명 기자 실적 없음")
 
-# =================================================================
-# ▼ 메인 UI 및 인쇄 모드 제어 (수정됨) ▼
-# =================================================================
+# ----------------- 메인 UI 및 모드 제어 -----------------
 
 # 세션 상태 초기화 (인쇄 모드 여부 확인)
 if 'print_mode' not in st.session_state:
     st.session_state['print_mode'] = False
 
-# =================================================================
-# ▼ 인쇄 모드 전용 스타일 (수정됨: 공백 제거 및 연속 출력 최적화) ▼
-# =================================================================
-
-PRINT_CSS = """
-<style>
-/* 1. 화면 미리보기용 (85% 축소) */
-.print-preview-layout {
-    transform: scale(0.85); 
-    transform-origin: top center; 
-    width: 117%;
-}
-
-@media print {
-    /* 2. 페이지 설정 */
-    @page { 
-        size: A4; 
-        margin: 5mm 10mm 5mm 10mm; /* 상하 여백을 확 줄임 */
-    }
-    
-    body { 
-        transform: scale(0.75) !important; /* 배율을 75%로 조금 더 줄여서 한 페이지에 많이 담기 */
-        transform-origin: top left !important; 
-        width: 133% !important; /* 100 / 0.75 */
-    }
-    
-    /* 3. 숨김 처리 */
-    .no-print, .stButton, header, footer, [data-testid="stSidebar"] { display: none !important; }
-    
-    /* 4. Streamlit 기본 간격(Gap) 강제 삭제 (가장 중요) */
-    .block-container {
-        padding-top: 0 !important;
-        padding-bottom: 0 !important;
-    }
-    [data-testid="stVerticalBlock"] {
-        gap: 0.5rem !important; /* 블록 간격을 최소화 */
-    }
-    
-    /* 5. 섹션 헤더 스타일 */
-    .section-header-container { 
-        break-before: auto !important; /* 강제 페이지 넘김 절대 금지 */
-        break-inside: avoid !important; /* 제목 달랑 혼자 남는 것 방지 */
-        margin-top: 20px !important;    /* 간격 최소화 */
-        padding-top: 10px !important;
-        border-top: 1px solid #eee;     /* 구분선 얇게 */
-    }
-    
-    .first-section { margin-top: 0 !important; border-top: none !important; }
-
-    /* 6. 내용물 자르기 규칙 완화 */
-    /* 차트나 표는 자르지 않되(avoid), 너무 공간을 차지하면 여백을 줄임 */
-    .stPlotlyChart, [data-testid="stDataFrame"], .kpi-container {
-        break-inside: avoid !important; 
-        margin-bottom: 10px !important;
-    }
-    
-    /* 텍스트 설명 등은 자연스럽게 잘려서 넘어가게 허용 */
-    .section-desc, p, span {
-        break-inside: auto !important;
-    }
-
-    /* 7. 인쇄용 푸터 */
-    .print-footer {
-        position: fixed;
-        bottom: 0;
-        left: 0;
-        width: 100%;
-        text-align: center;
-        font-size: 8px;
-        color: #bbb;
-        background: white;
-    }
-}
-</style>
-"""
-st.markdown(PRINT_CSS, unsafe_allow_html=True)
-
-# ----------------- 상단 헤더 영역 -----------------
+# 상단 헤더 영역
 c1, c2 = st.columns([2, 1])
 with c1: 
     st.markdown('<div class="report-title">📰 쿡앤셰프 주간 성과보고서</div>', unsafe_allow_html=True)
@@ -645,7 +660,7 @@ with c2:
             st.session_state['print_mode'] = False
             st.rerun()
         if col_btn2.button("🖨️ 인쇄 실행", type="primary"):
-            # 브라우저 인쇄 창 호출
+            # 브라우저 인쇄 창 호출 (iframe 외부 부모창 호출)
             st.components.v1.html("<script>window.parent.print();</script>", height=0, width=0)
     else:
         if col_btn2.button("🖨️ 인쇄 미리보기", type="primary"):
@@ -655,13 +670,12 @@ with c2:
     if not st.session_state['print_mode']:
         selected_week = st.selectbox("📅 조회 주차", list(WEEK_MAP.keys()), key="week_select", label_visibility="collapsed")
     else:
-        # 인쇄 모드일 때는 주차 선택 숨기고 텍스트만 표시하거나, 마지막 선택값 사용
         selected_week = st.session_state.get('week_select', list(WEEK_MAP.keys())[0])
 
 st.markdown(f'<div class="period-info">📅 조회 기간: {WEEK_MAP[selected_week]}</div>', unsafe_allow_html=True)
 st.markdown(f"<div class='update-time'>최종 집계: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}</div>", unsafe_allow_html=True)
 
-# ----------------- 데이터 로드 -----------------
+# 데이터 로드
 (cur_uv, cur_pv, df_daily, df_weekly, df_traffic_curr, df_traffic_last, 
  df_region_curr, df_region_last, df_age_curr, df_age_last, df_gender_curr, df_gender_last, 
  df_top10, df_raw_all, new_ratio, search_ratio, active_article_count) = load_all_dashboard_data(selected_week)
@@ -671,49 +685,67 @@ writers_df = get_writers_df_real(df_raw_all)
 # ----------------- 뷰 렌더링 (모드에 따라 분기) -----------------
 
 if st.session_state['print_mode']:
-    # [인쇄 모드] : 탭 없이 모든 함수를 순서대로 호출
-    st.info("💡 인쇄 미리보기 모드입니다. 내용이 잘리지 않는지 확인하고 우측 상단 '인쇄 실행'을 누르세요.")
+    # [인쇄 모드] : 페이지 분할 로직 적용 (1~6 페이지)
+    st.info("💡 인쇄 미리보기: 각 페이지별로 나누어 출력됩니다. (1-2 / 3-1 / 3-2 / 4-5 / 6 / 7-8)")
     
-    # 내용을 감싸는 컨테이너 (축소 적용을 위해)
     st.markdown('<div class="print-preview-layout">', unsafe_allow_html=True)
     
+    # --- [1페이지] 1.성과요약 + 2.접근경로 ---
     render_summary(df_weekly, cur_pv, cur_uv, new_ratio, search_ratio, df_daily, active_article_count)
     st.markdown("<br>", unsafe_allow_html=True)
-    
     render_traffic(df_traffic_curr, df_traffic_last)
-    st.markdown("<br>", unsafe_allow_html=True)
     
-    render_demographics(df_region_curr, df_region_last, df_age_curr, df_age_last, df_gender_curr, df_gender_last)
-    st.markdown("<br>", unsafe_allow_html=True)
+    # 페이지 넘김
+    st.markdown('<div class="page-break"></div>', unsafe_allow_html=True)
     
+    # --- [2페이지] 3.지역별 분석 ---
+    render_demo_region(df_region_curr, df_region_last)
+    
+    # 페이지 넘김
+    st.markdown('<div class="page-break"></div>', unsafe_allow_html=True)
+    
+    # --- [3페이지] 3.연령별/성별 분석 ---
+    render_demo_age_gender(df_age_curr, df_age_last, df_gender_curr, df_gender_last)
+    
+    # 페이지 넘김
+    st.markdown('<div class="page-break"></div>', unsafe_allow_html=True)
+    
+    # --- [4페이지] 4.TOP10 상세 + 5.TOP10 추이 ---
     render_top10_detail(df_top10)
     st.markdown("<br>", unsafe_allow_html=True)
-    
     render_top10_trends(df_top10)
-    st.markdown("<br>", unsafe_allow_html=True)
     
+    # 페이지 넘김
+    st.markdown('<div class="page-break"></div>', unsafe_allow_html=True)
+    
+    # --- [5페이지] 6.카테고리별 분석 ---
     render_category(df_top10)
-    st.markdown("<br>", unsafe_allow_html=True)
     
+    # 페이지 넘김
+    st.markdown('<div class="page-break"></div>', unsafe_allow_html=True)
+    
+    # --- [6페이지] 7.기자(본명) + 8.기자(필명) ---
     render_writer_real(writers_df)
     st.markdown("<br>", unsafe_allow_html=True)
-    
     render_writer_pen(writers_df)
     
-    # 인쇄용 강제 푸터
+    # 인쇄용 푸터
     st.markdown('<div class="print-footer">Cook&Chef Weekly Report - Generated by AI System</div>', unsafe_allow_html=True)
     st.markdown('</div>', unsafe_allow_html=True) # close layout div
 
 else:
-    # [일반 모드] : 기존 탭 방식 유지
+    # [일반 모드] : 탭 방식 유지
     tabs = st.tabs(["1.성과요약", "2.접근경로", "3.방문자특성", "4.Top10상세", "5.Top10추이", "6.카테고리", "7.기자(본명)", "8.기자(필명)"])
     with tabs[0]: render_summary(df_weekly, cur_pv, cur_uv, new_ratio, search_ratio, df_daily, active_article_count)
     with tabs[1]: render_traffic(df_traffic_curr, df_traffic_last)
-    with tabs[2]: render_demographics(df_region_curr, df_region_last, df_age_curr, df_age_last, df_gender_curr, df_gender_last)
+    with tabs[2]: 
+        render_demo_region(df_region_curr, df_region_last)
+        st.markdown("---")
+        render_demo_age_gender(df_age_curr, df_age_last, df_gender_curr, df_gender_last)
     with tabs[3]: render_top10_detail(df_top10)
     with tabs[4]: render_top10_trends(df_top10)
     with tabs[5]: render_category(df_top10)
     with tabs[6]: render_writer_real(writers_df)
     with tabs[7]: render_writer_pen(writers_df)
 
-st.markdown('<div class="footer-note no-print">※ 쿡앤셰프(Cook&Chef) 조회수 및 방문자 데이터는 GA4 API를 통해 실시간으로 집계되었습니다.</div>', unsafe_allow_html=True)
+st.markdown('<div class="footer-note no-print">※ 쿡앤셰프(Cook&Chef) GA4 데이터 자동 집계 시스템</div>', unsafe_allow_html=True)
