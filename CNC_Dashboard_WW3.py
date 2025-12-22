@@ -34,6 +34,7 @@ CHART_PALETTE = [COLOR_NAVY, COLOR_RED, "#5c6bc0", "#ef5350", "#8d6e63", COLOR_G
 COLOR_GENDER = {'여성': '#d32f2f', '남성': '#1a237e'} 
 NOW_STR = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
 
+# [수정] 인쇄 스타일 강화 및 버튼 숨김 처리 보완
 CSS = f"""
 <style>
 @import url('https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.8/dist/web/static/pretendard.css');
@@ -64,33 +65,36 @@ header[data-testid="stHeader"] {{ visibility: hidden !important; }}
 [data-testid="stDataFrame"] thead th {{ background-color: {COLOR_NAVY} !important; color: white !important; font-size: 1rem !important; font-weight: 600 !important; }}
 .footer-note {{ font-size: 0.85rem; color: #78909c; margin-top: 50px; border-top: 1px solid #eceff1; padding-top: 15px; text-align: center; }}
 
-/* ▼ 인쇄 모드 강력 수정 ▼ */
+/* ▼ 인쇄 모드 스타일 */
 @media print {{
     @page {{ size: A4; margin: 10mm; }}
     
-    html, body, [data-testid="stAppViewContainer"], [data-testid="stApp"], .main, .block-container {{
-        height: auto !important;
-        min-height: 100% !important;
-        overflow: visible !important;
-        display: block !important;
-        position: static !important;
-    }}
-    
-    header, footer, [data-testid="stSidebar"], [data-testid="stHeader"], [data-testid="stToolbar"], .stDeployButton, .no-print, .print-btn-container {{
+    /* 불필요한 요소 숨김 */
+    header, footer, [data-testid="stSidebar"], [data-testid="stHeader"], [data-testid="stToolbar"], .stDeployButton, .no-print, .print-btn-container, button {{
         display: none !important;
     }}
     
-    .block-container {{
-        max-width: 100% !important;
+    /* 전체 레이아웃 조정 */
+    html, body, [data-testid="stAppViewContainer"], [data-testid="stApp"], .main, .block-container {{
         width: 100% !important;
-        padding: 0 !important;
+        max-width: 100% !important;
+        height: auto !important;
+        min-height: 100% !important;
+        overflow: visible !important;
         margin: 0 !important;
+        padding: 0 !important;
+        display: block !important;
     }}
     
-    .section-header-container {{ break-before: page; page-break-before: always; margin-top: 20px !important; }}
-    .first-section {{ break-before: auto !important; page-break-before: auto !important; }}
+    /* 탭 헤더 숨기기 */
     .stTabs [data-baseweb="tab-list"] {{ display: none !important; }}
-    .stPlotlyChart {{ width: 100% !important; break-inside: avoid; page-break-inside: avoid; }}
+    
+    /* 차트 크기 조정 */
+    .stPlotlyChart {{ width: 100% !important; break-inside: avoid; }}
+    
+    /* 섹션별 페이지 넘김 설정 (필요시) */
+    .section-header-container {{ break-before: page; margin-top: 20px !important; }}
+    .first-section {{ break-before: auto !important; }}
     
     .print-footer {{
         position: fixed; bottom: 0; left: 0; width: 100%; text-align: center; font-size: 10px; color: #999;
@@ -285,15 +289,12 @@ def load_all_dashboard_data(selected_week):
         df_weekly['week_num'] = df_weekly['주차'].apply(lambda x: int(re.search(r'\d+', x).group()))
         df_weekly = df_weekly.sort_values('week_num')
     
-    # [수정됨] 활성 기사 수 집계 (조건 대폭 완화)
+    # [수정됨] 활성 기사 수 집계
     df_pages_count = run_ga4_report(s_dt, e_dt, ["pagePath"], ["screenPageViews"], limit=10000)
     
     if not df_pages_count.empty:
-        # article, news, view, story 등이 URL에 포함되어 있으면 모두 기사로 간주
         mask_article = df_pages_count['pagePath'].str.contains(r'article|news|view|story', case=False, regex=True, na=False)
         active_article_count = df_pages_count[mask_article].shape[0]
-        
-        # 그래도 0이면, 최소한 홈페이지가 아닌 서브페이지 개수로 카운트
         if active_article_count == 0:
              active_article_count = df_pages_count[df_pages_count['pagePath'].str.len() > 1].shape[0]
     else:
@@ -380,10 +381,8 @@ def load_all_dashboard_data(selected_week):
             return False
             
         exclude_mask = df_raw_top.apply(is_excluded, axis=1)
-        # 전체 데이터 보존 (Raw 컬럼명 유지)
         df_raw_all = df_raw_top[~exclude_mask].copy()
         
-        # Top 10 추출 및 컬럼명 변경
         df_top10 = df_raw_all.sort_values('screenPageViews', ascending=False).head(10)
         df_top10['순위'] = range(1, len(df_top10)+1)
         df_top10 = df_top10.rename(columns={'pageTitle': '제목', 'pagePath': '경로', 'screenPageViews': '전체조회수', 'activeUsers': '전체방문자수', 'userEngagementDuration': '평균체류시간', 'bounceRate': '이탈률'})
@@ -480,47 +479,30 @@ def render_top10_detail(df_top10):
             df_p4[c] = df_p4[c].apply(lambda x: f"{int(x):,}" if str(x).replace('.','').isdigit() else x)
         st.dataframe(df_p4[['순위','카테고리','세부카테고리','제목','작성자','발행일시','전체조회수','전체방문자수','좋아요','댓글','체류시간_fmt','신규방문자비율','이탈률']], use_container_width=True, hide_index=True)
 
-# [수정] TOP 10 추이 차트 - 시간대별 실데이터 반영
+# [복구 및 수정] 5번 섹션: 요청하신 '오늘 대화 처음'의 그래프 로직(가상 데이터)으로 복구
 def render_top10_trends(df_top10):
     st.markdown('<div class="section-header-container"><div class="section-header">5. TOP 10 기사 시간대별 조회수 추이</div></div>', unsafe_allow_html=True)
     if not df_top10.empty:
         df_p5 = df_top10.copy()
-        
-        # 테이블 데이터 포맷팅
-        time_cols = ['12시간', '24시간', '48시간']
-        display_cols = ['전체조회수'] + time_cols
-        
-        for c in display_cols:
+        for c in ['전체조회수','12시간','24시간','48시간']: 
             if c in df_p5.columns:
                 df_p5[c] = df_p5[c].apply(lambda x: f"{int(x):,}" if str(x).replace('.','').isdigit() else x)
+            
+        # 컬럼 존재 여부 체크 후 출력
+        cols = ['순위', '제목', '작성자', '발행일시', '전체조회수', '12시간', '24시간', '48시간']
+        exist_cols = [c for c in cols if c in df_p5.columns]
+        st.dataframe(df_p5[exist_cols], use_container_width=True, hide_index=True)
         
-        # 실제 데이터프레임에 해당 컬럼들이 있을 때만 표시
-        cols_to_show = ['순위', '제목', '작성자', '발행일시'] + [c for c in display_cols if c in df_p5.columns]
-        st.dataframe(df_p5[cols_to_show], use_container_width=True, hide_index=True)
-        
-        # 1~5위 차트 표시 (실데이터 반영)
+        # 1~5위 차트 표시 (요청하신 초기 버전 로직 복구)
         df_chart = df_top10.head(5)
         top5_data = []
         for _, r in df_chart.iterrows():
             ttl = (r['제목'][:12]+'..') if len(r['제목'])>12 else r['제목']
-            
-            # 12, 24, 48시간 데이터 추출 및 정제
-            for t_col in time_cols:
-                if t_col in r:
-                    try:
-                        val = r[t_col]
-                        # 문자열(콤마 포함)인 경우 처리, 숫자면 그대로 사용
-                        if isinstance(val, str):
-                            clean_val = int(val.replace(',', ''))
-                        else:
-                            clean_val = int(val)
-                    except:
-                        clean_val = 0
-                    
-                    top5_data.append({'기사제목': ttl, '시간대': t_col, '조회수': clean_val})
+            # 가상 유입경로 데이터 (실제 컬럼이 없으므로 이 로직 유지)
+            for ch, rt in zip(['네이버','구글','SNS','기타'], [0.45, 0.2, 0.2, 0.15]): 
+                top5_data.append({'기사제목':ttl, '유입경로':ch, '조회수':int(r['전체조회수']*rt)})
         
-        if top5_data:
-            st.plotly_chart(px.bar(pd.DataFrame(top5_data), y='기사제목', x='조회수', color='시간대', orientation='h', barmode='group', text_auto=',', color_discrete_sequence=CHART_PALETTE), use_container_width=True, key="p5_chart")
+        st.plotly_chart(px.bar(pd.DataFrame(top5_data), y='기사제목', x='조회수', color='유입경로', orientation='h', color_discrete_sequence=CHART_PALETTE), use_container_width=True, key="p5_chart")
 
 def render_category(df_top10):
     st.markdown('<div class="section-header-container"><div class="section-header">6. 카테고리별 분석</div></div>', unsafe_allow_html=True)
@@ -541,14 +523,12 @@ def render_category(df_top10):
         st.plotly_chart(px.bar(cat_sub, x='세부카테고리', y='기사수', text_auto=True, color='카테고리', color_discrete_sequence=CHART_PALETTE).update_layout(plot_bgcolor='white'), use_container_width=True)
         st.dataframe(cat_sub, use_container_width=True, hide_index=True)
 
-# [KeyError 수정됨] pageTitle, screenPageViews 컬럼 사용
 def get_writers_df_real(df_raw_all):
     pen_data = [{'필명':'맛객', '본명':'이경엽'}, {'필명':'Chef J', '본명':'조용수'}, {'필명':'푸드헌터', '본명':'김철호'}, {'필명':'Dr.Kim', '본명':'안정미'}]
     real_to_pen_map = {item['본명']: item['필명'] for item in pen_data}
     
     if df_raw_all.empty: return pd.DataFrame()
     
-    # 여기서 'pageTitle', 'screenPageViews' 등 원래 API 리턴 컬럼명을 사용
     writers = df_raw_all.groupby('작성자').agg(
         기사수=('pageTitle','count'), 
         총조회수=('screenPageViews','sum'),
@@ -590,14 +570,15 @@ c1, c2 = st.columns([2, 1])
 with c1: st.markdown('<div class="report-title">📰 쿡앤셰프 주간 성과보고서</div>', unsafe_allow_html=True)
 with c2: 
     print_mode = st.toggle("🖨️ 인쇄 모드 (모든 탭 펼치기)", value=False)
+    # [수정] 인쇄 버튼 스크립트 개선 (onclick 이벤트 강화)
     if print_mode:
         components.html(
             """
             <div class="print-btn-container">
-            <button onclick="setTimeout(function(){window.print()}, 500)" style="background-color:#1a237e;color:white;padding:10px 20px;border:none;border-radius:5px;cursor:pointer;font-weight:700;">🖨️ 지금 인쇄하기</button>
+                <button onclick="window.print();" style="background-color:#1a237e;color:white;padding:12px 24px;border:none;border-radius:6px;cursor:pointer;font-weight:700;font-size:16px;">🖨️ 인쇄 / PDF 저장</button>
             </div>
             """,
-            height=45
+            height=60
         )
     st.markdown('<div style="margin-top: 5px;"></div>', unsafe_allow_html=True)
     selected_week = st.selectbox("📅 조회 주차 (일~토)", list(WEEK_MAP.keys()), key="week_select", label_visibility="collapsed")
