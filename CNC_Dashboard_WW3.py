@@ -555,18 +555,17 @@ def render_writer_pen(writers_df):
 if 'print_mode' not in st.session_state:
     st.session_state['print_mode'] = False
 
-# 인쇄 모드 전용 스타일 (80% 축소 및 페이지 나누기 설정)
+# 인쇄 모드 전용 스타일 (페이지 강제 나눔 제거 + 80% 축소 유지)
 PRINT_CSS = """
 <style>
 /* 화면에서는 인쇄 모드일 때 컨텐츠를 80%로 축소해서 보여줌 */
 .print-preview-layout {
     transform: scale(0.85); 
     transform-origin: top center; 
-    width: 117%; /* 85% 축소했으므로 너비 보정 (100/0.85) */
+    width: 117%;
 }
 
 @media print {
-    /* 인쇄 시 여백 및 배율 조정 */
     @page { 
         size: A4; 
         margin: 10mm; 
@@ -574,17 +573,33 @@ PRINT_CSS = """
     body { 
         transform: scale(0.8) !important; 
         transform-origin: top left !important; 
-        width: 125% !important; /* 100/0.8 */
+        width: 125% !important;
     }
     
     /* 불필요한 요소 숨김 */
     .no-print, .stButton, header, footer, [data-testid="stSidebar"] { display: none !important; }
     
-    /* 섹션마다 페이지 넘김 방지 혹은 강제 넘김 */
-    .section-header-container { break-before: page; margin-top: 30px !important; }
-    .first-section { break-before: auto !important; } /* 첫 섹션은 페이지 넘김 없음 */
+    /* [핵심 수정] 섹션마다 페이지 넘김(break-before)을 제거하여 공란 없이 이어서 출력 */
+    .section-header-container { 
+        break-before: auto !important; /* 강제 페이지 넘김 해제 */
+        break-after: avoid !important; /* 헤더 바로 뒤에서 페이지가 끊기지 않도록 설정 */
+        margin-top: 50px !important;   /* 섹션 간 간격만 적당히 줌 */
+        border-top: 1px dashed #ccc;   /* 섹션 구분을 위한 가벼운 점선 (선택사항) */
+        padding-top: 20px;
+    }
     
-    /* 페이지 하단 푸터 (브라우저 설정에 따라 다를 수 있음) */
+    /* 첫 번째 섹션은 위쪽 간격/선 없음 */
+    .first-section { 
+        margin-top: 0 !important; 
+        border-top: none !important; 
+    }
+
+    /* 차트나 표가 페이지 끝에서 반으로 뚝 잘리는 것을 방지 */
+    .stPlotlyChart, [data-testid="stDataFrame"], .kpi-container {
+        break-inside: avoid !important;
+    }
+    
+    /* 인쇄용 푸터 */
     .print-footer {
         position: fixed;
         bottom: 0;
@@ -592,7 +607,6 @@ PRINT_CSS = """
         text-align: center;
         font-size: 10px;
         color: #999;
-        display: block !important;
     }
 }
 </style>
