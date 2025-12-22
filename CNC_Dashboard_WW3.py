@@ -285,9 +285,19 @@ def load_all_dashboard_data(selected_week):
         df_weekly['week_num'] = df_weekly['주차'].apply(lambda x: int(re.search(r'\d+', x).group()))
         df_weekly = df_weekly.sort_values('week_num')
     
-    # 활성 기사 수 확인
+    # [수정됨] 활성 기사 수 집계 (조건 대폭 완화)
     df_pages_count = run_ga4_report(s_dt, e_dt, ["pagePath"], ["screenPageViews"], limit=10000)
-    active_article_count = df_pages_count[df_pages_count['pagePath'].str.contains('articleView', na=False)].shape[0]
+    
+    if not df_pages_count.empty:
+        # article, news, view, story 등이 URL에 포함되어 있으면 모두 기사로 간주
+        mask_article = df_pages_count['pagePath'].str.contains(r'article|news|view|story', case=False, regex=True, na=False)
+        active_article_count = df_pages_count[mask_article].shape[0]
+        
+        # 그래도 0이면, 최소한 홈페이지가 아닌 서브페이지 개수로 카운트
+        if active_article_count == 0:
+             active_article_count = df_pages_count[df_pages_count['pagePath'].str.len() > 1].shape[0]
+    else:
+        active_article_count = 0
 
     # 4. 유입경로
     def map_source(s):
@@ -470,14 +480,47 @@ def render_top10_detail(df_top10):
             df_p4[c] = df_p4[c].apply(lambda x: f"{int(x):,}" if str(x).replace('.','').isdigit() else x)
         st.dataframe(df_p4[['순위','카테고리','세부카테고리','제목','작성자','발행일시','전체조회수','전체방문자수','좋아요','댓글','체류시간_fmt','신규방문자비율','이탈률']], use_container_width=True, hide_index=True)
 
+# [수정] TOP 10 추이 차트 - 시간대별 실데이터 반영
 def render_top10_trends(df_top10):
-    st.markdown('<div class="section-header-container"><div class="section-header">5. TOP 5 기사 조회수 비교</div></div>', unsafe_allow_html=True)
+    st.markdown('<div class="section-header-container"><div class="section-header">5. TOP 10 기사 시간대별 조회수 추이</div></div>', unsafe_allow_html=True)
     if not df_top10.empty:
-        df_chart = df_top10.head(5).copy()
-        df_chart['기사제목'] = df_chart['제목'].apply(lambda x: x[:15]+'..' if len(x)>15 else x)
-        fig = px.bar(df_chart, y='기사제목', x='전체조회수', orientation='h', text='전체조회수', color='전체조회수', color_continuous_scale='Blues')
-        fig.update_layout(yaxis=dict(autorange="reversed"))
-        st.plotly_chart(fig, use_container_width=True)
+        df_p5 = df_top10.copy()
+        
+        # 테이블 데이터 포맷팅
+        time_cols = ['12시간', '24시간', '48시간']
+        display_cols = ['전체조회수'] + time_cols
+        
+        for c in display_cols:
+            if c in df_p5.columns:
+                df_p5[c] = df_p5[c].apply(lambda x: f"{int(x):,}" if str(x).replace('.','').isdigit() else x)
+        
+        # 실제 데이터프레임에 해당 컬럼들이 있을 때만 표시
+        cols_to_show = ['순위', '제목', '작성자', '발행일시'] + [c for c in display_cols if c in df_p5.columns]
+        st.dataframe(df_p5[cols_to_show], use_container_width=True, hide_index=True)
+        
+        # 1~5위 차트 표시 (실데이터 반영)
+        df_chart = df_top10.head(5)
+        top5_data = []
+        for _, r in df_chart.iterrows():
+            ttl = (r['제목'][:12]+'..') if len(r['제목'])>12 else r['제목']
+            
+            # 12, 24, 48시간 데이터 추출 및 정제
+            for t_col in time_cols:
+                if t_col in r:
+                    try:
+                        val = r[t_col]
+                        # 문자열(콤마 포함)인 경우 처리, 숫자면 그대로 사용
+                        if isinstance(val, str):
+                            clean_val = int(val.replace(',', ''))
+                        else:
+                            clean_val = int(val)
+                    except:
+                        clean_val = 0
+                    
+                    top5_data.append({'기사제목': ttl, '시간대': t_col, '조회수': clean_val})
+        
+        if top5_data:
+            st.plotly_chart(px.bar(pd.DataFrame(top5_data), y='기사제목', x='조회수', color='시간대', orientation='h', barmode='group', text_auto=',', color_discrete_sequence=CHART_PALETTE), use_container_width=True, key="p5_chart")
 
 def render_category(df_top10):
     st.markdown('<div class="section-header-container"><div class="section-header">6. 카테고리별 분석</div></div>', unsafe_allow_html=True)
@@ -498,14 +541,14 @@ def render_category(df_top10):
         st.plotly_chart(px.bar(cat_sub, x='세부카테고리', y='기사수', text_auto=True, color='카테고리', color_discrete_sequence=CHART_PALETTE).update_layout(plot_bgcolor='white'), use_container_width=True)
         st.dataframe(cat_sub, use_container_width=True, hide_index=True)
 
-# [수정] df_raw_all 컬럼명 오류 수정 (pageTitle, screenPageViews 사용)
+# [KeyError 수정됨] pageTitle, screenPageViews 컬럼 사용
 def get_writers_df_real(df_raw_all):
     pen_data = [{'필명':'맛객', '본명':'이경엽'}, {'필명':'Chef J', '본명':'조용수'}, {'필명':'푸드헌터', '본명':'김철호'}, {'필명':'Dr.Kim', '본명':'안정미'}]
     real_to_pen_map = {item['본명']: item['필명'] for item in pen_data}
     
     if df_raw_all.empty: return pd.DataFrame()
     
-    # 여기서 '제목'->'pageTitle', '전체조회수'->'screenPageViews' 사용해야 함
+    # 여기서 'pageTitle', 'screenPageViews' 등 원래 API 리턴 컬럼명을 사용
     writers = df_raw_all.groupby('작성자').agg(
         기사수=('pageTitle','count'), 
         총조회수=('screenPageViews','sum'),
