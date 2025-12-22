@@ -88,6 +88,8 @@ CSS = f"""
 <style>
 @import url('https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.8/dist/web/static/pretendard.css');
 body {{ background-color: #ffffff; font-family: 'Pretendard', sans-serif; color: #263238; }}
+
+/* 화면 스타일 */
 .block-container {{ padding-top: 2rem; padding-bottom: 5rem; max_width: 1600px; }}
 [data-testid="stSidebar"] {{ display: none; }}
 .report-title {{ font-size: 2.6rem; font-weight: 900; color: {COLOR_NAVY}; border-bottom: 4px solid {COLOR_RED}; padding-bottom: 15px; }}
@@ -107,14 +109,32 @@ body {{ background-color: #ffffff; font-family: 'Pretendard', sans-serif; color:
 [data-testid="stDataFrame"] thead th {{ background-color: {COLOR_NAVY} !important; color: white !important; font-size: 1rem !important; font-weight: 600 !important; }}
 .footer-note {{ font-size: 0.85rem; color: #78909c; margin-top: 50px; border-top: 1px solid #eceff1; padding-top: 15px; text-align: center; }}
 
+/* 인쇄 전용 스타일 (중요 수정됨) */
 @media print {{
-    [data-testid="stSidebar"], header, footer, .stSelectbox, button, iframe {{ display: none !important; }}
-    .block-container {{ max-width: 100% !important; padding: 0 !important; }}
-    body {{ -webkit-print-color-adjust: exact; }}
+    /* 불필요한 UI 숨김 */
+    [data-testid="stSidebar"], header, footer, .stSelectbox, button, .stDeployButton {{ display: none !important; }}
+    
+    /* 전체 페이지 배경 및 폰트 설정 */
+    body {{ -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important; background-color: white !important; }}
+    
+    /* 콘텐츠가 잘리지 않도록 강제 설정 */
+    .block-container, [data-testid="stAppViewContainer"], .main {{
+        max-width: 100% !important;
+        width: 100% !important;
+        padding: 0 !important;
+        margin: 0 !important;
+        overflow: visible !important;
+        height: auto !important;
+    }}
+    
+    /* 차트 및 데이터프레임 강제 표시 */
+    .stPlotlyChart, [data-testid="stDataFrame"] {{ display: block !important; break-inside: avoid; }}
+    
+    /* 탭 내용 전체 표시 (선택된 탭만 나오는 한계가 있으나 최대한 표시) */
+    .stTabs {{ display: block !important; }}
 }}
 </style>
-"""
-st.markdown(CSS, unsafe_allow_html=True)
+"""st.markdown(CSS, unsafe_allow_html=True)
 
 def print_button():
     components.html(
