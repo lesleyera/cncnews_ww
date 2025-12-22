@@ -9,7 +9,7 @@ import re
 from bs4 import BeautifulSoup
 from datetime import datetime, timedelta
 
-# [변경] 인증 모듈 추가
+# [변경] 인증 모듈
 from google.oauth2 import service_account 
 from google.analytics.data_v1beta import BetaAnalyticsDataClient
 from google.analytics.data_v1beta.types import (
@@ -19,23 +19,14 @@ from google.analytics.data_v1beta.types import (
 # ----------------- 0. 환경 설정 및 GA4 클라이언트 -----------------
 PROPERTY_ID = "370663478" 
 
-# [변경] 로컬 파일 경로 제거 (Secrets 사용)
-# KEY_FILE_PATH = "ga-key.json" 
-
 @st.cache_resource
 def get_ga4_client():
     try:
-        # [수정] st.secrets에서 인증 정보 가져오기
-        # Streamlit Cloud의 Secrets에 [ga4_credentials] 섹션이 있어야 합니다.
+        # secrets에서 인증 정보 가져오기
         key_dict = st.secrets["ga4_credentials"]
-        
-        # 딕셔너리 정보를 기반으로 자격 증명 생성
         creds = service_account.Credentials.from_service_account_info(key_dict)
-        
-        # 클라이언트 생성 시 credentials 주입
         return BetaAnalyticsDataClient(credentials=creds)
     except Exception as e:
-        # 배포 환경에서 디버깅을 위해 에러 메시지 출력 (필요 시 주석 처리)
         st.error(f"GA4 클라이언트 연결 실패: {e}")
         return None
 
@@ -49,7 +40,6 @@ def clean_author_name(name):
 
 @st.cache_data(ttl=3600)
 def crawl_article_info(url_path):
-    """홈페이지에서 작성자, 좋아요, 댓글수, 카테고리, 세부카테고리를 가져옴"""
     full_url = f"http://www.cooknchefnews.com{url_path}"
     try:
         response = requests.get(full_url, timeout=3)
@@ -68,7 +58,6 @@ def crawl_article_info(url_path):
                     break
         
         author = clean_author_name(author)
-        
         likes = int(soup.select_one('.sns-like-count').text.replace(',', '')) if soup.select_one('.sns-like-count') else 0
         comments = int(soup.select_one('.comment-count').text.replace(',', '')) if soup.select_one('.comment-count') else 0
         
@@ -118,7 +107,6 @@ body {{ background-color: #ffffff; font-family: 'Pretendard', sans-serif; color:
 [data-testid="stDataFrame"] thead th {{ background-color: {COLOR_NAVY} !important; color: white !important; font-size: 1rem !important; font-weight: 600 !important; }}
 .footer-note {{ font-size: 0.85rem; color: #78909c; margin-top: 50px; border-top: 1px solid #eceff1; padding-top: 15px; text-align: center; }}
 
-/* 인쇄 스타일 */
 @media print {{
     [data-testid="stSidebar"], header, footer, .stSelectbox, button, iframe {{ display: none !important; }}
     .block-container {{ max-width: 100% !important; padding: 0 !important; }}
@@ -128,13 +116,10 @@ body {{ background-color: #ffffff; font-family: 'Pretendard', sans-serif; color:
 """
 st.markdown(CSS, unsafe_allow_html=True)
 
-# 인쇄 버튼
 def print_button():
     components.html(
         """
-        <style>
-        .print-btn { background-color: #1a237e; color: white; padding: 10px 20px; border: none; border-radius: 5px; cursor: pointer; font-weight: 700; font-family: 'Pretendard'; }
-        </style>
+        <style> .print-btn { background-color: #1a237e; color: white; padding: 10px 20px; border: none; border-radius: 5px; cursor: pointer; font-weight: 700; font-family: 'Pretendard'; } </style>
         <button class="print-btn" onclick="window.print()">🖨️ 인쇄/PDF</button>
         """,
         height=50
@@ -180,22 +165,15 @@ def run_ga4_report(start_date, end_date, dimensions, metrics, order_by_metric=No
         return pd.DataFrame(data)
     except: return pd.DataFrame(columns=dimensions + metrics)
 
-# ----------------- 도넛 차트 생성 함수 -----------------
 def create_donut_chart_with_val(df, names, values, color_map=None):
     if df.empty: return go.Figure()
-    
     if '구분' in df.columns:
         df_normal = df[df['구분'] != '기타'].sort_values(by=values, ascending=False)
         df_other = df[df['구분'] == '기타']
         df_sorted = pd.concat([df_normal, df_other])
-    else:
-        df_sorted = df
-
-    if color_map:
-        fig = px.pie(df_sorted, names=names, values=values, hole=0.5, color=names, color_discrete_map=color_map)
-    else:
-        fig = px.pie(df_sorted, names=names, values=values, hole=0.5, color_discrete_sequence=CHART_PALETTE)
-    
+    else: df_sorted = df
+    if color_map: fig = px.pie(df_sorted, names=names, values=values, hole=0.5, color=names, color_discrete_map=color_map)
+    else: fig = px.pie(df_sorted, names=names, values=values, hole=0.5, color_discrete_sequence=CHART_PALETTE)
     fig.update_traces(textposition='outside', textinfo='label+percent', sort=False)
     fig.update_layout(showlegend=False, margin=dict(t=30, b=80, l=40, r=40), height=350)
     return fig
@@ -207,10 +185,19 @@ def load_all_dashboard_data(selected_week):
     ls_dt = (datetime.strptime(s_dt, '%Y-%m-%d')-timedelta(days=7)).strftime('%Y-%m-%d')
     le_dt = (datetime.strptime(e_dt, '%Y-%m-%d')-timedelta(days=7)).strftime('%Y-%m-%d')
 
-    # 1. KPI
-    summary = run_ga4_report(s_dt, e_dt, [], ["activeUsers", "screenPageViews"])
-    sel_uv = int(summary['activeUsers'].iloc[0]) if not summary.empty else 0
-    sel_pv = int(summary['screenPageViews'].iloc[0]) if not summary.empty else 0
+    # 1. KPI (activeUsers, screenPageViews, newUsers 추가)
+    # [수정] newUsers를 함께 요청하여 신규 방문자 비율 계산
+    summary = run_ga4_report(s_dt, e_dt, [], ["activeUsers", "screenPageViews", "newUsers"])
+    
+    if not summary.empty:
+        sel_uv = int(summary['activeUsers'].iloc[0])
+        sel_pv = int(summary['screenPageViews'].iloc[0])
+        sel_new = int(summary['newUsers'].iloc[0])
+    else:
+        sel_uv, sel_pv, sel_new = 0, 0, 0
+
+    # 신규 방문자 비율 계산
+    new_visitor_ratio = round((sel_new / sel_uv * 100), 1) if sel_uv > 0 else 0
 
     # 2. 일별
     df_daily = run_ga4_report(s_dt, e_dt, ["date"], ["activeUsers", "screenPageViews"])
@@ -228,7 +215,7 @@ def load_all_dashboard_data(selected_week):
             weekly_list.append({'주차': wl, 'UV': uv, 'PV': pv, '발행기사수': 130 + (uv // 450) + np.random.randint(-10, 15)})
     df_weekly = pd.DataFrame(weekly_list)
 
-    # 4. 유입경로
+    # 4. 유입경로 (검색 유입 비율 계산용)
     def map_source(s):
         s = s.lower()
         if 'naver' in s: return '네이버'
@@ -241,6 +228,12 @@ def load_all_dashboard_data(selected_week):
     df_t_raw = run_ga4_report(s_dt, e_dt, ["sessionSource"], ["screenPageViews"])
     df_t_raw['유입경로'] = df_t_raw['sessionSource'].apply(map_source)
     df_traffic_curr = df_t_raw.groupby('유입경로')['screenPageViews'].sum().reset_index().rename(columns={'screenPageViews':'조회수'})
+    
+    # [수정] 검색 유입 비율 계산 (네이버, 구글, 다음)
+    search_engines = ['네이버', '구글', '다음']
+    search_pv = df_traffic_curr[df_traffic_curr['유입경로'].isin(search_engines)]['조회수'].sum()
+    total_pv_traffic = df_traffic_curr['조회수'].sum()
+    search_inflow_ratio = round((search_pv / total_pv_traffic * 100), 1) if total_pv_traffic > 0 else 0
     
     df_tl_raw = run_ga4_report(ls_dt, le_dt, ["sessionSource"], ["screenPageViews"])
     df_tl_raw['유입경로'] = df_tl_raw['sessionSource'].apply(map_source)
@@ -269,19 +262,19 @@ def load_all_dashboard_data(selected_week):
     df_region_curr = get_region_data(s_dt, e_dt)
     df_region_last = get_region_data(ls_dt, le_dt)
 
-    # 5-2. 연령 (기타 제외)
+    # 5-2. 연령
     def get_age_data(s, e):
         df = run_ga4_report(s, e, ["userAgeBracket"], ["activeUsers"], "activeUsers")
         if df.empty: return pd.DataFrame(columns=['구분', 'activeUsers'])
         df['temp_age'] = df['userAgeBracket'].replace({'unknown': '기타', '(not set)': '기타'})
         df['구분'] = df['temp_age'].apply(lambda x: x + '세' if x != '기타' else x)
-        df = df[df['구분'] != '기타'] # 제외
+        df = df[df['구분'] != '기타']
         return df.groupby('구분', as_index=False)['activeUsers'].sum()
 
     df_age_curr = get_age_data(s_dt, e_dt)
     df_age_last = get_age_data(ls_dt, le_dt)
 
-    # 5-3. 성별 (기타 제외)
+    # 5-3. 성별
     def get_gender_data(s, e):
         df = run_ga4_report(s, e, ["userGender"], ["activeUsers"], "activeUsers")
         if df.empty: return pd.DataFrame(columns=['구분', 'activeUsers'])
@@ -294,8 +287,8 @@ def load_all_dashboard_data(selected_week):
     df_gender_curr = get_gender_data(s_dt, e_dt)
     df_gender_last = get_gender_data(ls_dt, le_dt)
 
-    # 6. TOP 10 데이터 (Cook&Chef 제외)
-    df_raw_top = run_ga4_report(s_dt, e_dt, ["pageTitle", "pagePath"], ["screenPageViews", "activeUsers", "userEngagementDuration", "bounceRate"], "screenPageViews", limit=100) # limit 넉넉히
+    # 6. TOP 10 데이터
+    df_raw_top = run_ga4_report(s_dt, e_dt, ["pageTitle", "pagePath"], ["screenPageViews", "activeUsers", "userEngagementDuration", "bounceRate"], "screenPageViews", limit=100)
     
     if not df_raw_top.empty:
         auths, lks, cmts, cats, subcats = [], [], [], [], []
@@ -306,20 +299,16 @@ def load_all_dashboard_data(selected_week):
         df_raw_top['작성자'] = auths; df_raw_top['좋아요'] = lks; df_raw_top['댓글'] = cmts
         df_raw_top['카테고리'] = cats; df_raw_top['세부카테고리'] = subcats
         
-        # 1. 쿡앤셰프/Cook&Chef 포함 기사 완전 제거 (제목 or 작성자)
         def is_excluded(row):
             t = str(row['pageTitle']).lower().replace(' ', '')
             a = str(row['작성자']).lower().replace(' ', '')
-            
-            # 제목이나 작성자에 쿡앤셰프/Cook&Chef가 있으면 제거
             if 'cook&chef' in t or '쿡앤셰프' in t: return True
             if 'cook&chef' in a or '쿡앤셰프' in a: return True
             return False
             
         exclude_mask = df_raw_top.apply(is_excluded, axis=1)
-        df_top10 = df_raw_top[~exclude_mask].copy() # 제외 후 남은 데이터
+        df_top10 = df_raw_top[~exclude_mask].copy()
         
-        # 순위 산정 (1~10)
         df_top10 = df_top10.sort_values('screenPageViews', ascending=False).head(10)
         df_top10['순위'] = range(1, len(df_top10)+1)
         
@@ -333,12 +322,14 @@ def load_all_dashboard_data(selected_week):
         df_top10['24시간'] = (df_top10['전체조회수'].astype(int)*0.7).astype(int)
         df_top10['48시간'] = df_top10['전체조회수'].astype(int)
         df_top10['발행일시'] = s_dt
-        df_top10['신규방문자비율'] = "58.2%"
+        df_top10['신규방문자비율'] = f"{new_visitor_ratio}%" # 전체 비율 사용
     else:
         df_top10 = pd.DataFrame()
 
+    # [수정] new_visitor_ratio, search_inflow_ratio 반환 값에 추가
     return (sel_uv, sel_pv, df_daily, df_weekly, df_traffic_curr, df_traffic_last, 
-            df_region_curr, df_region_last, df_age_curr, df_age_last, df_gender_curr, df_gender_last, df_top10)
+            df_region_curr, df_region_last, df_age_curr, df_age_last, df_gender_curr, df_gender_last, df_top10, 
+            new_visitor_ratio, search_inflow_ratio)
 
 # ----------------- 4. 메인 UI -----------------
 c1, c2 = st.columns([3, 1])
@@ -351,19 +342,32 @@ with c2:
 st.markdown(f'<div class="period-info">📅 조회 기간: {WEEK_MAP[selected_week]}</div>', unsafe_allow_html=True)
 st.markdown(f"<div class='update-time'>최종 집계: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}</div>", unsafe_allow_html=True)
 
+# [수정] 반환 값 unpacking 업데이트
 (cur_uv, cur_pv, df_daily, df_weekly, df_traffic_curr, df_traffic_last, 
- df_region_curr, df_region_last, df_age_curr, df_age_last, df_gender_curr, df_gender_last, df_top10) = load_all_dashboard_data(selected_week)
+ df_region_curr, df_region_last, df_age_curr, df_age_last, df_gender_curr, df_gender_last, df_top10,
+ new_ratio, search_ratio) = load_all_dashboard_data(selected_week)
 
 tabs = st.tabs(["1.성과요약", "2.접근경로", "3.방문자특성", "4.Top10상세", "5.Top10추이", "6.카테고리", "7.기자(본명)", "8.기자(필명)"])
 
 # 1. 성과 요약
 with tabs[0]:
     st.markdown('<div class="section-header-container"><div class="section-header">1. 주간 전체 성과 요약</div></div>', unsafe_allow_html=True)
-    kpis = [("주간 발행기사수", df_weekly['발행기사수'].iloc[-1], "건"), ("주간 전체 조회수(PV)", cur_pv, "건"), ("주간 총 방문자수(UV)", cur_uv, "명"), 
-            ("방문자당 페이지뷰", round(cur_pv/cur_uv, 1) if cur_uv>0 else 0, "건"), ("신규 방문자 비율", 55.4, "%"), ("검색 유입 비율", 62.1, "%")]
+    
+    # [수정] 계산된 new_ratio, search_ratio 적용
+    pv_per_user = round(cur_pv/cur_uv, 1) if cur_uv > 0 else 0
+    
+    kpis = [
+        ("주간 발행기사수", df_weekly['발행기사수'].iloc[-1], "건"), 
+        ("주간 전체 조회수(PV)", cur_pv, "건"), 
+        ("주간 총 방문자수(UV)", cur_uv, "명"), 
+        ("방문자당 페이지뷰", pv_per_user, "건"), 
+        ("신규 방문자 비율", new_ratio, "%"), 
+        ("검색 유입 비율", search_ratio, "%")
+    ]
+    
     cols = st.columns(6)
     for i, (l, v, u) in enumerate(kpis):
-        v_f = f"{v:,}" if isinstance(v, (int, np.integer, float)) else str(v)
+        v_f = f"{v:,}" if isinstance(v, (int, np.integer, float)) and l != "방문자당 페이지뷰" and l != "신규 방문자 비율" and l != "검색 유입 비율" else str(v)
         cols[i].markdown(f'<div class="kpi-container"><div class="kpi-label">{l}</div><div class="kpi-value">{v_f}<span class="kpi-unit">{u}</span></div></div>', unsafe_allow_html=True)
     
     c1, c2 = st.columns(2)
@@ -412,7 +416,6 @@ with tabs[2]:
     for i in range(3):
         st.markdown(f"<div class='sub-header'>{demo_cats[i]} 분석</div>", unsafe_allow_html=True)
         c_curr, c_last = st.columns(2)
-        
         d_c = curr_data_list[i]
         d_l = last_data_list[i]
         
@@ -427,7 +430,6 @@ with tabs[2]:
 
         if not d_c.empty and not d_l.empty:
             df_change = pd.merge(d_c, d_l, on='구분', suffixes=('_이번', '_지난'), how='left').fillna(0)
-            
             total_c = df_change['activeUsers_이번'].sum()
             total_l = df_change['activeUsers_지난'].sum()
             
@@ -450,19 +452,16 @@ with tabs[2]:
             st.dataframe(df_disp[['구분', '이번주(%)', '지난주(%)', '변화(%p)']], use_container_width=True, hide_index=True)
         else:
             st.warning("데이터가 부족하여 비교표를 생성할 수 없습니다.")
-            
         st.markdown("<hr>", unsafe_allow_html=True)
 
 # 4. TOP 10 상세
 with tabs[3]:
     st.markdown('<div class="section-header-container"><div class="section-header">4. 최근 7일 조회수 TOP 10 기사 상세</div></div>', unsafe_allow_html=True)
-    
     if not df_top10.empty:
         df_p4 = df_top10.copy()
         df_p4['이탈률'] = df_p4['이탈률'].apply(lambda x: f"{float(x):.1f}%" if str(x).replace('.','').replace('-','').isdigit() else x)
         for c in ['전체조회수','전체방문자수','좋아요','댓글','스크롤90%']: 
             df_p4[c] = df_p4[c].apply(lambda x: f"{int(x):,}" if str(x).replace('.','').isdigit() else x)
-            
         st.dataframe(df_p4[['순위','카테고리','세부카테고리','제목','작성자','발행일시','전체조회수','전체방문자수','좋아요','댓글','평균체류시간','스크롤90%','신규방문자비율','이탈률']], use_container_width=True, hide_index=True)
 
 # 5. TOP 10 추이
@@ -472,10 +471,8 @@ with tabs[4]:
         df_p5 = df_top10.copy()
         for c in ['전체조회수','12시간','24시간','48시간']: 
             df_p5[c] = df_p5[c].apply(lambda x: f"{int(x):,}" if str(x).replace('.','').isdigit() else x)
-            
         st.dataframe(df_p5[['순위', '제목', '작성자', '발행일시', '전체조회수', '12시간', '24시간', '48시간']], use_container_width=True, hide_index=True)
         
-        # 1~5위 차트 표시
         df_chart = df_top10.head(5)
         top5_data = []
         for _, r in df_chart.iterrows():
@@ -484,7 +481,7 @@ with tabs[4]:
                 top5_data.append({'기사제목':ttl, '유입경로':ch, '조회수':int(r['전체조회수']*rt)})
         st.plotly_chart(px.bar(pd.DataFrame(top5_data), y='기사제목', x='조회수', color='유입경로', orientation='h', color_discrete_sequence=CHART_PALETTE), use_container_width=True, key="p5_chart")
 
-# ----------------- 6. 카테고리 -----------------
+# 6. 카테고리
 with tabs[5]:
     st.markdown("""
     <div class="section-header-container">
@@ -492,56 +489,37 @@ with tabs[5]:
         <div class="section-desc">메인 카테고리 및 세부 카테고리 실적</div>
     </div>
     """, unsafe_allow_html=True)
-    
     if not df_top10.empty:
         df_real = df_top10
-        
-        # 메인 카테고리
-        cat_main = df_real.groupby('카테고리').agg(
-            기사수=('제목','count'), 
-            전체조회수=('전체조회수','sum')
-        ).reset_index()
+        cat_main = df_real.groupby('카테고리').agg(기사수=('제목','count'), 전체조회수=('전체조회수','sum')).reset_index()
         cat_main['비중'] = (cat_main['기사수'] / cat_main['기사수'].sum() * 100).map('{:.1f}%'.format)
         cat_main['기사1건당평균'] = (cat_main['전체조회수'] / cat_main['기사수']).astype(int).map('{:,}'.format)
         cat_main['전체조회수'] = cat_main['전체조회수'].map('{:,}'.format)
 
         st.markdown('<div class="chart-header">1. 지난 7일간 발행된 카테고리별 기사 수 (메인)</div>', unsafe_allow_html=True)
-        
-        # 1. 메인 - 그래프
         fig = px.bar(cat_main, x='카테고리', y='기사수', text_auto=True, color='카테고리', color_discrete_sequence=CHART_PALETTE)
         fig.update_layout(showlegend=False, plot_bgcolor='white')
         st.plotly_chart(fig, use_container_width=True)
-        # 2. 메인 - 표
         st.dataframe(cat_main, use_container_width=True, hide_index=True)
         
         st.markdown('<hr>', unsafe_allow_html=True)
 
-        # 세부 카테고리
         st.markdown('<div class="chart-header">2. 지난 7일간 발행된 세부 카테고리별 기사 수</div>', unsafe_allow_html=True)
-        
-        cat_sub = df_real.groupby(['카테고리', '세부카테고리']).agg(
-            기사수=('제목','count'),
-            전체조회수=('전체조회수','sum')
-        ).reset_index()
-        total_articles = cat_sub['기사수'].sum()
-        cat_sub['비중(전체대비)'] = (cat_sub['기사수'] / total_articles * 100).map('{:.1f}%'.format)
+        cat_sub = df_real.groupby(['카테고리', '세부카테고리']).agg(기사수=('제목','count'), 전체조회수=('전체조회수','sum')).reset_index()
+        cat_sub['비중(전체대비)'] = (cat_sub['기사수'] / cat_sub['기사수'].sum() * 100).map('{:.1f}%'.format)
         cat_sub['기사1건당평균'] = (cat_sub['전체조회수'] / cat_sub['기사수']).astype(int).map('{:,}'.format)
         cat_sub['전체조회수'] = cat_sub['전체조회수'].map('{:,}'.format)
         
-        # 3. 세부 - 그래프
         fig_sub = px.bar(cat_sub, x='세부카테고리', y='기사수', text_auto=True, color='카테고리', color_discrete_sequence=CHART_PALETTE)
         fig_sub.update_layout(plot_bgcolor='white')
         st.plotly_chart(fig_sub, use_container_width=True)
-        # 4. 세부 - 표
         st.dataframe(cat_sub, use_container_width=True, hide_index=True)
 
-# ----------------- 7. 기자 (본명) -----------------
-# Pen Data 정의 (Tab 7, 8 공통 사용)
+# 7. 기자 (본명)
 pen_data = [
     {'필명':'맛객', '본명':'이경엽'}, {'필명':'Chef J', '본명':'조용수'}, 
     {'필명':'푸드헌터', '본명':'김철호'}, {'필명':'Dr.Kim', '본명':'안정미'}
 ]
-# 매핑용 딕셔너리
 real_to_pen_map = {item['본명']: item['필명'] for item in pen_data}
 
 with tabs[6]:
@@ -550,25 +528,14 @@ with tabs[6]:
         <div class="section-header">7. 이번주 기자별 분석 (본명 기준)</div>
     </div>
     """, unsafe_allow_html=True)
-    
     if not df_top10.empty:
         df_real = df_top10
-        
-        writers = df_real.groupby('작성자').agg(
-            기사수=('제목','count'),
-            총조회수=('전체조회수','sum')
-        ).reset_index().sort_values('총조회수', ascending=False)
-        
+        writers = df_real.groupby('작성자').agg(기사수=('제목','count'), 총조회수=('전체조회수','sum')).reset_index().sort_values('총조회수', ascending=False)
         writers['순위'] = range(1, len(writers)+1)
-        
-        # 필명 매핑 (본명 기준이므로 해당 본명에 매칭되는 필명이 있으면 표시)
         writers['필명'] = writers['작성자'].map(real_to_pen_map).fillna('')
-        
         writers['평균조회수'] = (writers['총조회수']/writers['기사수']).astype(int)
         writers['좋아요'] = np.random.randint(50, 500, len(writers))
         writers['댓글'] = np.random.randint(10, 100, len(writers))
-        
-        # 8번 탭에서 쓰기 위해 저장 (필명이 있는 경우만)
         writers_data_for_tab8 = writers.copy()
         
         disp_w = writers.copy()
@@ -577,36 +544,26 @@ with tabs[6]:
         
         disp_w = disp_w[['순위', '작성자', '필명', '기사수', '총조회수', '평균조회수', '좋아요', '댓글']]
         disp_w.columns = ['순위', '본명', '필명', '발행기사 수', '전체 조회 수', '기사 1건 당 평균 조회 수', '좋아요 개수', '댓글 개수']
-        
         st.dataframe(disp_w, use_container_width=True, hide_index=True)
 
-# ----------------- 8. 기자 (필명) -----------------
+# 8. 기자 (필명)
 with tabs[7]:
     st.markdown("""
     <div class="section-header-container">
         <div class="section-header">8. 이번주 기자별 분석 (필명 기준)</div>
     </div>
     """, unsafe_allow_html=True)
-    
     if 'writers_data_for_tab8' in locals() and not writers_data_for_tab8.empty:
         w_df = writers_data_for_tab8.copy()
-        
-        # 필명이 있는 데이터만 필터링
         df_pen = w_df[w_df['필명'] != ''].copy()
-        
         if not df_pen.empty:
-            # 순위 재산정 (필명 기준)
             df_pen['순위'] = df_pen['총조회수'].rank(ascending=False).astype(int)
             df_pen = df_pen.sort_values('순위')
-            
-            # 포맷팅
             df_pen_disp = df_pen.copy()
             for c in ['총조회수','평균조회수','좋아요','댓글']:
                 df_pen_disp[c] = df_pen_disp[c].apply(lambda x: f"{x:,}")
-                
             df_pen_disp = df_pen_disp[['순위', '필명', '작성자', '기사수', '총조회수', '평균조회수', '좋아요', '댓글']]
             df_pen_disp.columns = ['순위', '필명', '본명', '발행기사 수', '전체 조회 수', '기사 1건 당 평균 조회 수', '좋아요 개수', '댓글 개수']
-            
             st.dataframe(df_pen_disp, use_container_width=True, hide_index=True)
         else:
             st.info("이번주 실적에 해당하는 필명(맛객, Chef J 등) 기자가 없습니다.")
