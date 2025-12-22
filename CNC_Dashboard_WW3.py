@@ -8,6 +8,7 @@ import requests
 import re
 from bs4 import BeautifulSoup
 from datetime import datetime, timedelta
+import concurrent.futures # 병렬 처리를 위한 모듈
 
 # 인증 모듈
 from google.oauth2 import service_account 
@@ -17,69 +18,35 @@ from google.analytics.data_v1beta.types import (
 )
 
 # ----------------- 1. 페이지 설정 (가장 먼저 실행) -----------------
-st.set_page_config(layout="wide", page_title="쿡앤셰프 주간 성과보고서", page_icon="📰", initial_sidebar_state="collapsed")
+st.set_page_config(
+    layout="wide", 
+    page_title="쿡앤셰프 주간 성과보고서", 
+    page_icon="📰", 
+    initial_sidebar_state="collapsed"
+)
 
-# ----------------- 0. 진입 보안 화면 (로그인) -----------------
-def check_password():
-    def password_entered():
-        # 비밀번호 확인
-        if st.session_state["password"] == "cncnews2026":
-            st.session_state["password_correct"] = True
-            del st.session_state["password"]
-        else:
-            st.session_state["password_correct"] = False
-
-    if "password_correct" not in st.session_state:
-        st.session_state["password_correct"] = False
-
-    if not st.session_state["password_correct"]:
-        st.markdown(
-            """
-            <style>
-            .login-container { max-width: 400px; margin: 100px auto; padding: 40px; text-align: center; }
-            .login-title { font-size: 24px; font-weight: 700; color: #1a237e; margin-bottom: 20px; }
-            .stTextInput > div > div > input { text-align: center; font-size: 18px; letter-spacing: 2px; }
-            </style>
-            """, unsafe_allow_html=True
-        )
-        c1, c2, c3 = st.columns([1, 2, 1])
-        with c2:
-            st.markdown('<div style="margin-top: 100px;"></div>', unsafe_allow_html=True)
-            st.markdown('<div class="login-title">🔒 쿡앤셰프 주간 성과보고서 보안 접속</div>', unsafe_allow_html=True)
-            st.text_input("Access Code", type="password", on_change=password_entered, key="password", label_visibility="collapsed")
-            if "password_correct" in st.session_state and st.session_state["password_correct"] is False:
-                st.error("🚫 코드가 올바르지 않습니다.")
-        return False
-    return True
-
-if not check_password():
-    st.stop()
-
-# =================================================================
-# ▼ 메인 로직 시작 (로그인 성공 후) ▼
-# =================================================================
-
-PROPERTY_ID = "370663478" 
+# ----------------- 2. CSS 스타일 정의 (UI 수정 사항 반영) -----------------
 COLOR_NAVY = "#1a237e"
 COLOR_RED = "#d32f2f"
 COLOR_GREY = "#78909c"
 COLOR_BG_ACCENT = "#fffcf7"
 CHART_PALETTE = [COLOR_NAVY, COLOR_RED, "#5c6bc0", "#ef5350", "#8d6e63", COLOR_GREY]
 COLOR_GENDER = {'여성': '#d32f2f', '남성': '#1a237e'} 
-
-# 현재 시간 (인쇄용)
 NOW_STR = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
 
-# CSS 스타일 정의 (인쇄 최적화 포함)
 CSS = f"""
 <style>
 @import url('https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.8/dist/web/static/pretendard.css');
 body {{ background-color: #ffffff; font-family: 'Pretendard', sans-serif; color: #263238; }}
 
-/* 화면 공통 스타일 */
-.block-container {{ padding-top: 1rem; padding-bottom: 5rem; max_width: 1600px; }}
+/* [UI 수정 1] 상단 여백 확보 (잘림 방지) 및 헤더 숨김 */
+header[data-testid="stHeader"] {{ visibility: hidden !important; }}
+[data-testid="stToolbar"] {{ visibility: hidden !important; }}
+.block-container {{ padding-top: 3rem !important; padding-bottom: 5rem; max_width: 1600px; }}
 [data-testid="stSidebar"] {{ display: none; }}
-.report-title {{ font-size: 2.6rem; font-weight: 900; color: {COLOR_NAVY}; border-bottom: 4px solid {COLOR_RED}; padding-bottom: 15px; }}
+
+/* 보고서 스타일 */
+.report-title {{ font-size: 2.6rem; font-weight: 900; color: {COLOR_NAVY}; border-bottom: 4px solid {COLOR_RED}; padding-bottom: 15px; margin-top: 10px; }}
 .period-info {{ font-size: 1.2rem; font-weight: 700; color: #455a64; margin-top: 10px; }}
 .update-time {{ color: {COLOR_NAVY}; font-weight: 700; font-size: 1.1rem; text-align: right; margin-top: -15px; margin-bottom: 30px; font-family: monospace; }}
 .kpi-container {{ background-color: #fff; border: 1px solid #eceff1; border-top: 5px solid {COLOR_RED}; border-radius: 8px; padding: 20px 10px; text-align: center; margin-bottom: 15px; height: 160px; display: flex; flex-direction: column; justify-content: center; box-shadow: 0 4px 12px rgba(0,0,0,0.03); }}
@@ -99,52 +66,77 @@ body {{ background-color: #ffffff; font-family: 'Pretendard', sans-serif; color:
 
 /* 인쇄 모드 전용 스타일 */
 @media print {{
-    @page {{ size: A4; margin: 15mm; }}
+    @page {{ size: A4; margin: 10mm; }}
     
-    /* 인쇄 시 숨길 항목 */
-    [data-testid="stSidebar"], header, footer, .stSelectbox, button, .stDeployButton, .no-print {{ display: none !important; }}
+    /* 인쇄 시 숨길 항목 (버튼, 사이드바 등) */
+    [data-testid="stSidebar"], header, footer, .stSelectbox, button, .stDeployButton, .no-print, [data-testid="stToolbar"] {{ display: none !important; }}
     
     body {{ -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important; background-color: white !important; font-size: 10pt; }}
     
-    /* 컨테이너 너비 확장 */
     .block-container, [data-testid="stAppViewContainer"], .main {{
         max-width: 100% !important; width: 100% !important; padding: 0 !important; margin: 0 !important; overflow: visible !important;
     }}
     
-    /* 탭 메뉴 숨기기 (인쇄 모드에서는 탭 헤더 필요 없음) */
     .stTabs [data-baseweb="tab-list"] {{ display: none !important; }}
-
-    /* 페이지 나눔 설정 (각 섹션 헤더 앞에서 페이지 넘기기) */
     .section-header-container {{ break-before: page; page-break-before: always; margin-top: 0 !important; }}
-    /* 첫 번째 페이지는 넘기지 않음 */
     .first-section {{ break-before: auto !important; page-break-before: auto !important; }}
-
-    /* 차트 깨짐 방지 */
     .stPlotlyChart {{ width: 100% !important; break-inside: avoid; page-break-inside: avoid; }}
     
-    /* 하단 고정 푸터 (페이지 번호 및 인쇄일시) */
     .print-footer {{
-        position: fixed;
-        bottom: 0;
-        left: 0;
-        width: 100%;
-        text-align: center;
-        font-size: 10px;
-        color: #999;
-        border-top: 1px solid #ddd;
-        padding-top: 5px;
-        background-color: white;
-        z-index: 9999;
+        position: fixed; bottom: 0; left: 0; width: 100%; text-align: center; font-size: 10px; color: #999;
+        border-top: 1px solid #ddd; padding-top: 5px; background-color: white; z-index: 9999;
     }}
-    .print-footer::after {{
-        content: "Cook&Chef Weekly Report | Printed: {NOW_STR}";
-    }}
+    .print-footer::after {{ content: "Cook&Chef Weekly Report | Printed: {NOW_STR}"; }}
 }}
 </style>
-
 <div class="print-footer"></div>
 """
 st.markdown(CSS, unsafe_allow_html=True)
+
+# ----------------- 3. 진입 보안 화면 (로그인) -----------------
+def check_password():
+    """로그인 로직: 성공 시 세션을 업데이트하고 True 반환"""
+    if st.session_state.get("password_correct", False):
+        return True
+
+    # 로그인 컨테이너 생성 (성공 시 비우기 위해 empty 사용)
+    login_placeholder = st.empty()
+    
+    with login_placeholder.container():
+        st.markdown(
+            """
+            <style>
+            .login-container { max-width: 400px; margin: 100px auto; padding: 40px; text-align: center; }
+            .login-title { font-size: 24px; font-weight: 700; color: #1a237e; margin-bottom: 20px; text-align: center; }
+            .stTextInput > div > div > input { text-align: center; font-size: 18px; letter-spacing: 2px; }
+            </style>
+            """, unsafe_allow_html=True
+        )
+        c1, c2, c3 = st.columns([1, 2, 1])
+        with c2:
+            st.markdown('<div style="margin-top: 100px;"></div>', unsafe_allow_html=True)
+            st.markdown('<div class="login-title">🔒 쿡앤셰프 주간 성과보고서</div>', unsafe_allow_html=True)
+            
+            password = st.text_input("Access Code", type="password", key="password_input", label_visibility="collapsed")
+            
+            if password:
+                if password == "cncnews2026":
+                    st.session_state["password_correct"] = True
+                    login_placeholder.empty() # [UI 수정 2] 로그인 폼 및 에러 메시지 즉시 제거
+                    st.rerun() # 화면 갱신
+                else:
+                    st.error("🚫 코드가 올바르지 않습니다.")
+    
+    return False
+
+if not check_password():
+    st.stop()
+
+# =================================================================
+# ▼ 메인 로직 시작 (로그인 성공 후) ▼
+# =================================================================
+
+PROPERTY_ID = "370663478" 
 
 # ----------------- GA4 및 데이터 처리 함수 -----------------
 @st.cache_resource
@@ -162,11 +154,11 @@ def clean_author_name(name):
     name = name.replace('#', '').replace('기자', '')
     return ' '.join(name.split())
 
-@st.cache_data(ttl=3600)
-def crawl_article_info(url_path):
+# [속도 개선] 크롤링 함수 - 병렬 처리를 위해 개별 호출 가능하게 유지
+def crawl_single_article(url_path):
     full_url = f"http://www.cooknchefnews.com{url_path}"
     try:
-        response = requests.get(full_url, timeout=3)
+        response = requests.get(full_url, timeout=2) # 타임아웃 단축
         soup = BeautifulSoup(response.text, 'html.parser')
         author = "관리자"
         author_tag = soup.select_one('.user-name') or soup.select_one('.writer') or soup.select_one('.byline')
@@ -187,8 +179,9 @@ def crawl_article_info(url_path):
         else:
             meta_sec = soup.select_one('meta[property="article:section"]')
             if meta_sec: cat = meta_sec.get('content')
-        return author, likes, comments, cat, subcat
-    except: return "관리자", 0, 0, "뉴스", "이슈"
+        return (author, likes, comments, cat, subcat)
+    except: 
+        return ("관리자", 0, 0, "뉴스", "이슈")
 
 def get_sunday_to_saturday_ranges(count=12):
     ranges = {}
@@ -240,14 +233,14 @@ def create_donut_chart_with_val(df, names, values, color_map=None):
     fig.update_layout(showlegend=False, margin=dict(t=30, b=80, l=40, r=40), height=350)
     return fig
 
-@st.cache_data(ttl=3600)
+@st.cache_data(ttl=3600, show_spinner="데이터 불러오는 중...")
 def load_all_dashboard_data(selected_week):
     dr = WEEK_MAP[selected_week]
     s_dt, e_dt = dr.split(' ~ ')[0].replace('.', '-'), dr.split(' ~ ')[1].replace('.', '-')
     ls_dt = (datetime.strptime(s_dt, '%Y-%m-%d')-timedelta(days=7)).strftime('%Y-%m-%d')
     le_dt = (datetime.strptime(e_dt, '%Y-%m-%d')-timedelta(days=7)).strftime('%Y-%m-%d')
 
-    # 1. KPI
+    # 1. KPI (요약)
     summary = run_ga4_report(s_dt, e_dt, [], ["activeUsers", "screenPageViews", "newUsers"])
     if not summary.empty:
         sel_uv = int(summary['activeUsers'].iloc[0])
@@ -256,23 +249,68 @@ def load_all_dashboard_data(selected_week):
     else: sel_uv, sel_pv, sel_new = 0, 0, 0
     new_visitor_ratio = round((sel_new / sel_uv * 100), 1) if sel_uv > 0 else 0
 
-    # 2. 일별
+    # 2. 일별 데이터
     df_daily = run_ga4_report(s_dt, e_dt, ["date"], ["activeUsers", "screenPageViews"])
     if not df_daily.empty:
         df_daily = df_daily.rename(columns={'date':'날짜', 'activeUsers':'UV', 'screenPageViews':'PV'})
         df_daily['날짜'] = pd.to_datetime(df_daily['날짜']).dt.strftime('%m-%d')
     
-    # 3. 3개월 추이
+    # 3. [속도 개선] 3개월 추이 - 반복문 제거하고 한 번에 호출 후 그룹핑
+    # 12주 전 날짜 계산
+    start_of_trend = (datetime.strptime(s_dt, '%Y-%m-%d') - timedelta(weeks=12)).strftime('%Y-%m-%d')
+    df_trend_raw = run_ga4_report(start_of_trend, e_dt, ["date"], ["activeUsers", "screenPageViews"])
+    
     weekly_list = []
-    for wl, dstr in list(WEEK_MAP.items())[::-1]:
-        ws, we = dstr.split(' ~ ')[0].replace('.', '-'), dstr.split(' ~ ')[1].replace('.', '-')
+    if not df_trend_raw.empty:
+        df_trend_raw['date'] = pd.to_datetime(df_trend_raw['date'])
+        # 해당 날짜가 속한 주의 정보 매핑
+        week_keys = list(WEEK_MAP.keys())
+        
+        # 각 주차별로 데이터 집계
+        for wl, dstr in week_keys[::-1]: # 최근부터 과거로 역순인 MAP을 순회
+            ws_str, we_str = dstr.split(' ~ ')
+            ws = datetime.strptime(ws_str, '%Y.%m.%d')
+            we = datetime.strptime(we_str, '%Y.%m.%d')
+            
+            # 해당 주차 기간에 해당하는 데이터 필터링
+            mask = (df_trend_raw['date'] >= ws) & (df_trend_raw['date'] <= we)
+            week_data = df_trend_raw[mask]
+            
+            if not week_data.empty:
+                uv = int(week_data['activeUsers'].sum()) # UV는 단순 합산이 아니지만 추이용 근사치로 사용하거나, 정확성을 위해 별도 쿼리 필요시 유지. 여기선 속도 위해 합산(또는 Max)
+                # GA4 API 특성상 UV는 기간별 Unique라 합산 시 중복이 발생함. 
+                # 하지만 속도를 위해 트렌드용으로는 '일별 UV의 합'을 사용하거나, 
+                # 정확도를 위해 여기서만 12번 루프를 돌리는 방법이 있음. 
+                # 쿡앤셰프의 요청사항은 "속도 개선"이므로, 트렌드는 일별 단순 PV 합산, UV는 근사치로 처리하겠습니다.
+                # (정확한 주간 UV를 원하면 병렬처리를 해야 함 -> 아래 로직 적용)
+                pass 
+    
+    # [속도 개선 보완] 주간 UV의 정확도를 위해 병렬 요청으로 변경
+    def fetch_week_data(week_label, date_str):
+        ws, we = date_str.split(' ~ ')[0].replace('.', '-'), date_str.split(' ~ ')[1].replace('.', '-')
         res = run_ga4_report(ws, we, [], ["activeUsers", "screenPageViews"])
         if not res.empty:
-            uv = int(res['activeUsers'][0]); pv = int(res['screenPageViews'][0])
-            weekly_list.append({'주차': wl, 'UV': uv, 'PV': pv, '발행기사수': 130 + (uv // 450) + np.random.randint(-10, 15)})
-    df_weekly = pd.DataFrame(weekly_list)
+            return {
+                '주차': week_label, 
+                'UV': int(res['activeUsers'][0]), 
+                'PV': int(res['screenPageViews'][0]),
+                '발행기사수': 130 + (int(res['activeUsers'][0]) // 450) + np.random.randint(-10, 15)
+            }
+        return None
 
-    # 4. 유입경로
+    # ThreadPoolExecutor를 사용한 병렬 요청 (12주치)
+    with concurrent.futures.ThreadPoolExecutor(max_workers=5) as executor:
+        futures = [executor.submit(fetch_week_data, wl, dstr) for wl, dstr in list(WEEK_MAP.items())[:12]] # 최근 12개만
+        results = [f.result() for f in concurrent.futures.as_completed(futures) if f.result()]
+    
+    # 주차 순서 정렬 (과거 -> 현재)
+    df_weekly = pd.DataFrame(results)
+    if not df_weekly.empty:
+        # 주차 문자열에서 숫자만 추출해 정렬
+        df_weekly['week_num'] = df_weekly['주차'].apply(lambda x: int(re.search(r'\d+', x).group()))
+        df_weekly = df_weekly.sort_values('week_num')
+
+    # 4. 유입경로 (기존 로직 유지)
     def map_source(s):
         s = s.lower()
         if 'naver' in s: return '네이버'
@@ -294,51 +332,68 @@ def load_all_dashboard_data(selected_week):
     df_tl_raw['유입경로'] = df_tl_raw['sessionSource'].apply(map_source)
     df_traffic_last = df_tl_raw.groupby('유입경로')['screenPageViews'].sum().reset_index().rename(columns={'screenPageViews':'조회수'})
 
-    # 5. 방문자 특성
+    # 5. 방문자 특성 (함수 내부화로 깔끔하게)
     def clean_and_group(df, col_name):
         if df.empty: return pd.DataFrame(columns=['구분', 'activeUsers'])
         df['구분'] = df[col_name].replace({'(not set)': '기타', '': '기타', 'unknown': '기타'}).fillna('기타')
         return df.groupby('구분', as_index=False)['activeUsers'].sum()
 
     region_map = {'Seoul':'서울','Gyeonggi-do':'경기','Incheon':'인천','Busan':'부산','Daegu':'대구','Gyeongsangnam-do':'경남','Gyeongsangbuk-do':'경북','Chungcheongnam-do':'충남','Chungcheongbuk-do':'충북','Jeollanam-do':'전남','Jeollabuk-do':'전북','Gangwon-do':'강원','Daejeon':'대전','Gwangju':'광주','Ulsan':'울산','Jeju-do':'제주','Sejong-si':'세종'}
-    def get_region_data(s, e):
-        df = run_ga4_report(s, e, ["region"], ["activeUsers"], "activeUsers", limit=50)
-        if df.empty: return pd.DataFrame(columns=['구분', 'activeUsers'])
-        df['region_mapped'] = df['region'].map(region_map).fillna('기타')
-        return clean_and_group(df, 'region_mapped')
-    df_region_curr = get_region_data(s_dt, e_dt)
-    df_region_last = get_region_data(ls_dt, le_dt)
+    
+    # 병렬 처리로 지난주/이번주 데이터 동시 요청
+    with concurrent.futures.ThreadPoolExecutor(max_workers=6) as executor:
+        f_reg_c = executor.submit(run_ga4_report, s_dt, e_dt, ["region"], ["activeUsers"], "activeUsers", 50)
+        f_reg_l = executor.submit(run_ga4_report, ls_dt, le_dt, ["region"], ["activeUsers"], "activeUsers", 50)
+        f_age_c = executor.submit(run_ga4_report, s_dt, e_dt, ["userAgeBracket"], ["activeUsers"], "activeUsers")
+        f_age_l = executor.submit(run_ga4_report, ls_dt, le_dt, ["userAgeBracket"], ["activeUsers"], "activeUsers")
+        f_gen_c = executor.submit(run_ga4_report, s_dt, e_dt, ["userGender"], ["activeUsers"], "activeUsers")
+        f_gen_l = executor.submit(run_ga4_report, ls_dt, le_dt, ["userGender"], ["activeUsers"], "activeUsers")
 
-    def get_age_data(s, e):
-        df = run_ga4_report(s, e, ["userAgeBracket"], ["activeUsers"], "activeUsers")
-        if df.empty: return pd.DataFrame(columns=['구분', 'activeUsers'])
-        df['temp_age'] = df['userAgeBracket'].replace({'unknown': '기타', '(not set)': '기타'})
-        df['구분'] = df['temp_age'].apply(lambda x: x + '세' if x != '기타' else x)
-        df = df[df['구분'] != '기타']
-        return df.groupby('구분', as_index=False)['activeUsers'].sum()
-    df_age_curr = get_age_data(s_dt, e_dt)
-    df_age_last = get_age_data(ls_dt, le_dt)
+        # 결과 처리
+        # Region
+        d_rc, d_rl = f_reg_c.result(), f_reg_l.result()
+        d_rc['region_mapped'] = d_rc['region'].map(region_map).fillna('기타') if not d_rc.empty else []
+        d_rl['region_mapped'] = d_rl['region'].map(region_map).fillna('기타') if not d_rl.empty else []
+        df_region_curr = clean_and_group(d_rc, 'region_mapped')
+        df_region_last = clean_and_group(d_rl, 'region_mapped')
 
-    def get_gender_data(s, e):
-        df = run_ga4_report(s, e, ["userGender"], ["activeUsers"], "activeUsers")
-        if df.empty: return pd.DataFrame(columns=['구분', 'activeUsers'])
+        # Age
+        d_ac, d_al = f_age_c.result(), f_age_l.result()
+        for df in [d_ac, d_al]:
+            if not df.empty:
+                df['temp_age'] = df['userAgeBracket'].replace({'unknown': '기타', '(not set)': '기타'})
+                df['구분'] = df['temp_age'].apply(lambda x: x + '세' if x != '기타' else x)
+        df_age_curr = d_ac[d_ac['구분'] != '기타'].groupby('구분', as_index=False)['activeUsers'].sum() if not d_ac.empty else pd.DataFrame()
+        df_age_last = d_al[d_al['구분'] != '기타'].groupby('구분', as_index=False)['activeUsers'].sum() if not d_al.empty else pd.DataFrame()
+
+        # Gender
+        d_gc, d_gl = f_gen_c.result(), f_gen_l.result()
         gender_map = {'male': '남성', 'female': '여성'}
-        df['mapped'] = df['userGender'].map(gender_map)
-        df = df.dropna(subset=['mapped'])
-        df['구분'] = df['mapped']
-        return df.groupby('구분', as_index=False)['activeUsers'].sum()
-    df_gender_curr = get_gender_data(s_dt, e_dt)
-    df_gender_last = get_gender_data(ls_dt, le_dt)
+        for df in [d_gc, d_gl]:
+            if not df.empty:
+                df['mapped'] = df['userGender'].map(gender_map)
+                df['구분'] = df['mapped']
+        df_gender_curr = d_gc.dropna(subset=['mapped']).groupby('구분', as_index=False)['activeUsers'].sum() if not d_gc.empty else pd.DataFrame()
+        df_gender_last = d_gl.dropna(subset=['mapped']).groupby('구분', as_index=False)['activeUsers'].sum() if not d_gl.empty else pd.DataFrame()
 
-    # 6. TOP 10
+    # 6. TOP 10 및 크롤링 (병렬 처리 핵심 구간)
     df_raw_top = run_ga4_report(s_dt, e_dt, ["pageTitle", "pagePath"], ["screenPageViews", "activeUsers", "userEngagementDuration", "bounceRate"], "screenPageViews", limit=100)
+    
     if not df_raw_top.empty:
-        auths, lks, cmts, cats, subcats = [], [], [], [], []
-        for p in df_raw_top['pagePath']:
-            a, l, c, ct, sct = crawl_article_info(p)
-            auths.append(a); lks.append(l); cmts.append(c); cats.append(ct); subcats.append(sct)
-        df_raw_top['작성자'] = auths; df_raw_top['좋아요'] = lks; df_raw_top['댓글'] = cmts
-        df_raw_top['카테고리'] = cats; df_raw_top['세부카테고리'] = subcats
+        paths = df_raw_top['pagePath'].tolist()
+        
+        # [속도 개선] ThreadPoolExecutor로 크롤링 병렬 실행
+        with concurrent.futures.ThreadPoolExecutor(max_workers=20) as executor:
+            scraped_data = list(executor.map(crawl_single_article, paths))
+        
+        # 결과 매핑
+        auths, lks, cmts, cats, subcats = zip(*scraped_data)
+        
+        df_raw_top['작성자'] = auths
+        df_raw_top['좋아요'] = lks
+        df_raw_top['댓글'] = cmts
+        df_raw_top['카테고리'] = cats
+        df_raw_top['세부카테고리'] = subcats
         
         def is_excluded(row):
             t = str(row['pageTitle']).lower().replace(' ', '')
@@ -346,6 +401,7 @@ def load_all_dashboard_data(selected_week):
             if 'cook&chef' in t or '쿡앤셰프' in t: return True
             if 'cook&chef' in a or '쿡앤셰프' in a: return True
             return False
+            
         exclude_mask = df_raw_top.apply(is_excluded, axis=1)
         df_top10 = df_raw_top[~exclude_mask].copy()
         df_top10 = df_top10.sort_values('screenPageViews', ascending=False).head(10)
@@ -363,11 +419,15 @@ def load_all_dashboard_data(selected_week):
             df_region_curr, df_region_last, df_age_curr, df_age_last, df_gender_curr, df_gender_last, df_top10, 
             new_visitor_ratio, search_inflow_ratio)
 
-# ----------------- 렌더링 함수 (탭 내용을 함수로 분리) -----------------
+# ----------------- 렌더링 함수들 (UI 구성) -----------------
 def render_summary(df_weekly, cur_pv, cur_uv, new_ratio, search_ratio, df_daily):
     st.markdown('<div class="section-header-container first-section"><div class="section-header">1. 주간 전체 성과 요약</div></div>', unsafe_allow_html=True)
     pv_per_user = round(cur_pv/cur_uv, 1) if cur_uv > 0 else 0
-    kpis = [("주간 발행기사수", df_weekly['발행기사수'].iloc[-1], "건"), ("주간 전체 조회수(PV)", cur_pv, "건"), ("주간 총 방문자수(UV)", cur_uv, "명"), 
+    
+    # 주간 발행기사수는 df_weekly가 비어있을 경우 예외처리
+    art_count = df_weekly['발행기사수'].iloc[-1] if not df_weekly.empty else 0
+    
+    kpis = [("주간 발행기사수", art_count, "건"), ("주간 전체 조회수(PV)", cur_pv, "건"), ("주간 총 방문자수(UV)", cur_uv, "명"), 
             ("방문자당 페이지뷰", pv_per_user, "건"), ("신규 방문자 비율", new_ratio, "%"), ("검색 유입 비율", search_ratio, "%")]
     cols = st.columns(6)
     for i, (l, v, u) in enumerate(kpis):
@@ -376,16 +436,18 @@ def render_summary(df_weekly, cur_pv, cur_uv, new_ratio, search_ratio, df_daily)
     c1, c2 = st.columns(2)
     with c1:
         st.markdown('<div class="sub-header">📊 주간 일별 방문 추이</div>', unsafe_allow_html=True)
-        fig = px.bar(df_daily.melt(id_vars='날짜'), x='날짜', y='value', color='variable', barmode='group', color_discrete_map={'UV': COLOR_GREY, 'PV': COLOR_NAVY})
-        st.plotly_chart(fig, use_container_width=True)
+        if not df_daily.empty:
+            fig = px.bar(df_daily.melt(id_vars='날짜'), x='날짜', y='value', color='variable', barmode='group', color_discrete_map={'UV': COLOR_GREY, 'PV': COLOR_NAVY})
+            st.plotly_chart(fig, use_container_width=True)
     with c2:
         st.markdown('<div class="sub-header">📈 최근 3달 간 추이 분석</div>', unsafe_allow_html=True)
-        fig2 = go.Figure()
-        fig2.add_trace(go.Bar(x=df_weekly['주차'], y=df_weekly['UV'], name='UV', marker_color=COLOR_GREY))
-        fig2.add_trace(go.Bar(x=df_weekly['주차'], y=df_weekly['PV'], name='PV', marker_color=COLOR_NAVY))
-        fig2.add_trace(go.Scatter(x=df_weekly['주차'], y=df_weekly['발행기사수'], name='기사수', yaxis='y2', line=dict(color=COLOR_RED, width=3)))
-        fig2.update_layout(yaxis2=dict(overlaying='y', side='right'), barmode='group', plot_bgcolor='white', margin=dict(t=0))
-        st.plotly_chart(fig2, use_container_width=True)
+        if not df_weekly.empty:
+            fig2 = go.Figure()
+            fig2.add_trace(go.Bar(x=df_weekly['주차'], y=df_weekly['UV'], name='UV', marker_color=COLOR_GREY))
+            fig2.add_trace(go.Bar(x=df_weekly['주차'], y=df_weekly['PV'], name='PV', marker_color=COLOR_NAVY))
+            fig2.add_trace(go.Scatter(x=df_weekly['주차'], y=df_weekly['발행기사수'], name='기사수', yaxis='y2', line=dict(color=COLOR_RED, width=3)))
+            fig2.update_layout(yaxis2=dict(overlaying='y', side='right'), barmode='group', plot_bgcolor='white', margin=dict(t=0))
+            st.plotly_chart(fig2, use_container_width=True)
 
 def render_traffic(df_traffic_curr, df_traffic_last):
     st.markdown('<div class="section-header-container"><div class="section-header">2. 주간 접근 경로 분석</div></div>', unsafe_allow_html=True)
@@ -459,7 +521,6 @@ def render_category(df_top10):
     st.markdown('<div class="section-header-container"><div class="section-header">6. 카테고리별 분석</div></div>', unsafe_allow_html=True)
     if not df_top10.empty:
         df_real = df_top10
-        # [수정된 부분] SyntaxError 해결: 괄호 중복 제거
         cat_main = df_real.groupby('카테고리').agg(기사수=('제목','count'), 전체조회수=('전체조회수','sum')).reset_index()
         
         cat_main['비중'] = (cat_main['기사수'] / cat_main['기사수'].sum() * 100).map('{:.1f}%'.format)
