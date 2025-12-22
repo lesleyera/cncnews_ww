@@ -22,7 +22,7 @@ st.set_page_config(layout="wide", page_title="쿡앤셰프 주간 성과보고�
 # ----------------- 0. 진입 보안 화면 (로그인) -----------------
 def check_password():
     def password_entered():
-        # [수정] 비밀번호 변경 (cncnews2026)
+        # 비밀번호 확인
         if st.session_state["password"] == "cncnews2026":
             st.session_state["password_correct"] = True
             del st.session_state["password"]
@@ -45,7 +45,6 @@ def check_password():
         c1, c2, c3 = st.columns([1, 2, 1])
         with c2:
             st.markdown('<div style="margin-top: 100px;"></div>', unsafe_allow_html=True)
-            # [수정] 잠금 화면 메인 제목 변경
             st.markdown('<div class="login-title">🔒 쿡앤셰프 주간 성과보고서 보안 접속</div>', unsafe_allow_html=True)
             st.text_input("Access Code", type="password", on_change=password_entered, key="password", label_visibility="collapsed")
             if "password_correct" in st.session_state and st.session_state["password_correct"] is False:
@@ -460,7 +459,9 @@ def render_category(df_top10):
     st.markdown('<div class="section-header-container"><div class="section-header">6. 카테고리별 분석</div></div>', unsafe_allow_html=True)
     if not df_top10.empty:
         df_real = df_top10
-        cat_main = df_real.groupby('카테고리').agg(기사수=('제목','count'), 전체조회수=('전체조회수=('전체조회수','sum')).reset_index()
+        # [수정된 부분] SyntaxError 해결: 괄호 중복 제거
+        cat_main = df_real.groupby('카테고리').agg(기사수=('제목','count'), 전체조회수=('전체조회수','sum')).reset_index()
+        
         cat_main['비중'] = (cat_main['기사수'] / cat_main['기사수'].sum() * 100).map('{:.1f}%'.format)
         cat_main['기사1건당평균'] = (cat_main['전체조회수'] / cat_main['기사수']).astype(int).map('{:,}'.format)
         cat_main['전체조회수'] = cat_main['전체조회수'].map('{:,}'.format)
