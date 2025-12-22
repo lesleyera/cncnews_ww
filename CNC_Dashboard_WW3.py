@@ -580,66 +580,17 @@ with tabs[7]: render_writer_pen(writers_df)
 
 st.markdown('<div class="footer-note no-print">※ 쿡앤셰프(Cook&Chef) 조회수 및 방문자 데이터는 GA4 API를 통해 실시간으로 집계되었습니다.</div>', unsafe_allow_html=True)
 
-# ----------------- 새 창 인쇄 로직 (JavaScript 주입) -----------------
-# 버튼을 눌렀을 때만 작동하며, 현재 화면의 탭 내용을 무시하고 전체 내용을 포함하는 HTML을 생성해 새창으로 띄움
+# ----------------- 인쇄 로직 (수정됨) -----------------
+# 수정 사항: 
+# 1. 복잡한 DOM 복사 대신 브라우저 네이티브 인쇄(window.print) 사용
+# 2. iframe 내부가 아닌 부모 창(window.parent)을 호출하여 에러 해결
+# 3. Plotly 차트 깨짐 방지
+
 if print_btn:
-    # 1. 스크립트로 현재 페이지의 모든 콘텐츠를 복사하거나 재구성해야 함
-    # 하지만 Streamlit에서는 DOM 직접 접근이 제한적임. 
-    # 따라서, 가장 쉬운 방법은 'print_mode'용 쿼리 파라미터를 붙여서 새 창을 띄우는 것이지만, 
-    # 현재 코드 구조상 자바스크립트로 현재 렌더링된 iframe 내용을 긁어서 여는 방식을 시도함.
-    
-    # 강력한 인쇄 스크립트: 현재 페이지의 스타일을 포함하여 새 윈도우 생성 -> 인쇄 -> 닫기
     js_print = """
     <script>
-        function openPrintWindow() {
-            // 현재 문서의 전체 내용을 가져옴 (탭에 숨겨진 내용은 가져오기 어려움)
-            // 따라서 '인쇄 모드'를 토글하는 대신, 사용자가 수동으로 모든 탭을 열 필요 없이
-            // Streamlit의 특성상 한 페이지에 모두 펼쳐진 버전을 따로 만들거나, 
-            // 현재 화면(보이는 부분)만 인쇄하도록 유도하는 것이 현실적임.
-            
-            // 하지만 사용자가 원한 것은 '새 웹페이지에 뜨게 해서 인쇄'이므로,
-            // 현재 페이지를 새 탭으로 복제하여 인쇄 명령을 내리는 스크립트를 실행.
-            
-            var printWindow = window.open('', '_blank');
-            printWindow.document.write('<html><head><title>Print Report</title>');
-            
-            // 현재 페이지의 모든 스타일 시트 복사
-            var styles = document.getElementsByTagName('style');
-            for (var i = 0; i < styles.length; i++) {
-                printWindow.document.write(styles[i].outerHTML);
-            }
-            var links = document.getElementsByTagName('link');
-            for (var i = 0; i < links.length; i++) {
-                if (links[i].rel == 'stylesheet') {
-                    printWindow.document.write(links[i].outerHTML);
-                }
-            }
-            
-            printWindow.document.write('</head><body>');
-            
-            // 메인 컨테이너 내용 복사 (헤더/푸터 제외 시도)
-            var content = document.querySelector('.main .block-container');
-            if (content) {
-                // 탭 구조를 제거하고 내용을 펼치기는 어려우므로, 현재 보이는 그대로 출력하거나
-                // 인쇄 모드 전용 뷰를 별도로 구현해야 완벽함.
-                // 여기서는 현재 화면 캡처 방식을 사용.
-                printWindow.document.write(content.innerHTML);
-            } else {
-                printWindow.document.write('<h1>Error: Content not found</h1>');
-            }
-            
-            printWindow.document.write('</body></html>');
-            printWindow.document.close();
-            
-            // 이미지/차트 로딩 시간 확보 후 인쇄
-            setTimeout(function() {
-                printWindow.focus();
-                printWindow.print();
-                // printWindow.close(); // 자동 닫기 (선택 사항)
-            }, 1000);
-        }
-        openPrintWindow();
+        // iframe 안에서 실행되므로 부모 창(메인 앱)에 인쇄 명령을 내려야 합니다.
+        window.parent.print();
     </script>
     """
-    # Streamlit 컴포넌트로 JS 실행 (높이 0으로 숨김)
-    components.html(js_print, height=0)
+    components.html(js_print, height=0, width=0)
