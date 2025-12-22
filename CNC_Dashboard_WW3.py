@@ -136,15 +136,28 @@ body {{ background-color: #ffffff; font-family: 'Pretendard', sans-serif; color:
 </style>
 """st.markdown(CSS, unsafe_allow_html=True)
 
+# 인쇄 버튼
 def print_button():
     components.html(
         """
-        <style> .print-btn { background-color: #1a237e; color: white; padding: 10px 20px; border: none; border-radius: 5px; cursor: pointer; font-weight: 700; font-family: 'Pretendard'; } </style>
-        <button class="print-btn" onclick="window.print()">🖨️ 인쇄/PDF</button>
+        <style>
+        .print-btn { 
+            background-color: #1a237e; 
+            color: white; 
+            padding: 10px 20px; 
+            border: none; 
+            border-radius: 5px; 
+            cursor: pointer; 
+            font-weight: 700; 
+            font-family: 'Pretendard', sans-serif;
+            font-size: 16px;
+        }
+        .print-btn:hover { background-color: #0d47a1; }
+        </style>
+        <button class="print-btn" onclick="window.parent.print()">🖨️ 인쇄/PDF</button>
         """,
         height=50
     )
-
 # ----------------- 2. 일~토 주차 계산 -----------------
 def get_sunday_to_saturday_ranges(count=12):
     ranges = {}
