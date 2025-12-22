@@ -134,7 +134,10 @@ body {{ background-color: #ffffff; font-family: 'Pretendard', sans-serif; color:
     .stTabs {{ display: block !important; }}
 }}
 </style>
-"""st.markdown(CSS, unsafe_allow_html=True)
+"""
+
+
+st.markdown(CSS, unsafe_allow_html=True)
 
 # 인쇄 버튼
 def print_button():
