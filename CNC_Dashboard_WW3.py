@@ -547,50 +547,140 @@ def render_writer_pen(writers_df):
             st.dataframe(disp_w, use_container_width=True, hide_index=True)
         else: st.info("필명 기자 실적 없음")
 
-# ----------------- 4. 메인 UI 및 모드 제어 -----------------
+# =================================================================
+# ▼ 메인 UI 및 인쇄 모드 제어 (수정됨) ▼
+# =================================================================
+
+# 세션 상태 초기화 (인쇄 모드 여부 확인)
+if 'print_mode' not in st.session_state:
+    st.session_state['print_mode'] = False
+
+# 인쇄 모드 전용 스타일 (80% 축소 및 페이지 나누기 설정)
+PRINT_CSS = """
+<style>
+/* 화면에서는 인쇄 모드일 때 컨텐츠를 80%로 축소해서 보여줌 */
+.print-preview-layout {
+    transform: scale(0.85); 
+    transform-origin: top center; 
+    width: 117%; /* 85% 축소했으므로 너비 보정 (100/0.85) */
+}
+
+@media print {
+    /* 인쇄 시 여백 및 배율 조정 */
+    @page { 
+        size: A4; 
+        margin: 10mm; 
+    }
+    body { 
+        transform: scale(0.8) !important; 
+        transform-origin: top left !important; 
+        width: 125% !important; /* 100/0.8 */
+    }
+    
+    /* 불필요한 요소 숨김 */
+    .no-print, .stButton, header, footer, [data-testid="stSidebar"] { display: none !important; }
+    
+    /* 섹션마다 페이지 넘김 방지 혹은 강제 넘김 */
+    .section-header-container { break-before: page; margin-top: 30px !important; }
+    .first-section { break-before: auto !important; } /* 첫 섹션은 페이지 넘김 없음 */
+    
+    /* 페이지 하단 푸터 (브라우저 설정에 따라 다를 수 있음) */
+    .print-footer {
+        position: fixed;
+        bottom: 0;
+        width: 100%;
+        text-align: center;
+        font-size: 10px;
+        color: #999;
+        display: block !important;
+    }
+}
+</style>
+"""
+st.markdown(PRINT_CSS, unsafe_allow_html=True)
+
+# ----------------- 상단 헤더 영역 -----------------
 c1, c2 = st.columns([2, 1])
-with c1: st.markdown('<div class="report-title">📰 쿡앤셰프 주간 성과보고서</div>', unsafe_allow_html=True)
-with c2: 
-    # 인쇄 모드 (새 창 열기 로직으로 완전 교체)
-    print_btn = st.button("🖨️ 새 창에서 인쇄하기 (추천)", type="primary")
-    st.markdown('<div style="margin-top: 5px;"></div>', unsafe_allow_html=True)
-    selected_week = st.selectbox("📅 조회 주차 (일~토)", list(WEEK_MAP.keys()), key="week_select", label_visibility="collapsed")
+with c1: 
+    st.markdown('<div class="report-title">📰 쿡앤셰프 주간 성과보고서</div>', unsafe_allow_html=True)
+
+with c2:
+    col_btn1, col_btn2 = st.columns(2)
+    # 인쇄 모드 토글 버튼
+    if st.session_state['print_mode']:
+        if col_btn1.button("🔙 대시보드로 복귀", type="secondary"):
+            st.session_state['print_mode'] = False
+            st.rerun()
+        if col_btn2.button("🖨️ 인쇄 실행", type="primary"):
+            # 브라우저 인쇄 창 호출
+            st.components.v1.html("<script>window.parent.print();</script>", height=0, width=0)
+    else:
+        if col_btn2.button("🖨️ 인쇄 미리보기", type="primary"):
+            st.session_state['print_mode'] = True
+            st.rerun()
+        
+    if not st.session_state['print_mode']:
+        selected_week = st.selectbox("📅 조회 주차", list(WEEK_MAP.keys()), key="week_select", label_visibility="collapsed")
+    else:
+        # 인쇄 모드일 때는 주차 선택 숨기고 텍스트만 표시하거나, 마지막 선택값 사용
+        selected_week = st.session_state.get('week_select', list(WEEK_MAP.keys())[0])
 
 st.markdown(f'<div class="period-info">📅 조회 기간: {WEEK_MAP[selected_week]}</div>', unsafe_allow_html=True)
 st.markdown(f"<div class='update-time'>최종 집계: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}</div>", unsafe_allow_html=True)
 
-# 데이터 로드
+# ----------------- 데이터 로드 -----------------
 (cur_uv, cur_pv, df_daily, df_weekly, df_traffic_curr, df_traffic_last, 
  df_region_curr, df_region_last, df_age_curr, df_age_last, df_gender_curr, df_gender_last, 
  df_top10, df_raw_all, new_ratio, search_ratio, active_article_count) = load_all_dashboard_data(selected_week)
 
-# 기자 분석
 writers_df = get_writers_df_real(df_raw_all)
 
-# 일반 뷰 (탭 방식)
-tabs = st.tabs(["1.성과요약", "2.접근경로", "3.방문자특성", "4.Top10상세", "5.Top10추이", "6.카테고리", "7.기자(본명)", "8.기자(필명)"])
-with tabs[0]: render_summary(df_weekly, cur_pv, cur_uv, new_ratio, search_ratio, df_daily, active_article_count)
-with tabs[1]: render_traffic(df_traffic_curr, df_traffic_last)
-with tabs[2]: render_demographics(df_region_curr, df_region_last, df_age_curr, df_age_last, df_gender_curr, df_gender_last)
-with tabs[3]: render_top10_detail(df_top10)
-with tabs[4]: render_top10_trends(df_top10)
-with tabs[5]: render_category(df_top10)
-with tabs[6]: render_writer_real(writers_df)
-with tabs[7]: render_writer_pen(writers_df)
+# ----------------- 뷰 렌더링 (모드에 따라 분기) -----------------
+
+if st.session_state['print_mode']:
+    # [인쇄 모드] : 탭 없이 모든 함수를 순서대로 호출
+    st.info("💡 인쇄 미리보기 모드입니다. 내용이 잘리지 않는지 확인하고 우측 상단 '인쇄 실행'을 누르세요.")
+    
+    # 내용을 감싸는 컨테이너 (축소 적용을 위해)
+    st.markdown('<div class="print-preview-layout">', unsafe_allow_html=True)
+    
+    render_summary(df_weekly, cur_pv, cur_uv, new_ratio, search_ratio, df_daily, active_article_count)
+    st.markdown("<br>", unsafe_allow_html=True)
+    
+    render_traffic(df_traffic_curr, df_traffic_last)
+    st.markdown("<br>", unsafe_allow_html=True)
+    
+    render_demographics(df_region_curr, df_region_last, df_age_curr, df_age_last, df_gender_curr, df_gender_last)
+    st.markdown("<br>", unsafe_allow_html=True)
+    
+    render_top10_detail(df_top10)
+    st.markdown("<br>", unsafe_allow_html=True)
+    
+    render_top10_trends(df_top10)
+    st.markdown("<br>", unsafe_allow_html=True)
+    
+    render_category(df_top10)
+    st.markdown("<br>", unsafe_allow_html=True)
+    
+    render_writer_real(writers_df)
+    st.markdown("<br>", unsafe_allow_html=True)
+    
+    render_writer_pen(writers_df)
+    
+    # 인쇄용 강제 푸터
+    st.markdown('<div class="print-footer">Cook&Chef Weekly Report - Generated by AI System</div>', unsafe_allow_html=True)
+    st.markdown('</div>', unsafe_allow_html=True) # close layout div
+
+else:
+    # [일반 모드] : 기존 탭 방식 유지
+    tabs = st.tabs(["1.성과요약", "2.접근경로", "3.방문자특성", "4.Top10상세", "5.Top10추이", "6.카테고리", "7.기자(본명)", "8.기자(필명)"])
+    with tabs[0]: render_summary(df_weekly, cur_pv, cur_uv, new_ratio, search_ratio, df_daily, active_article_count)
+    with tabs[1]: render_traffic(df_traffic_curr, df_traffic_last)
+    with tabs[2]: render_demographics(df_region_curr, df_region_last, df_age_curr, df_age_last, df_gender_curr, df_gender_last)
+    with tabs[3]: render_top10_detail(df_top10)
+    with tabs[4]: render_top10_trends(df_top10)
+    with tabs[5]: render_category(df_top10)
+    with tabs[6]: render_writer_real(writers_df)
+    with tabs[7]: render_writer_pen(writers_df)
 
 st.markdown('<div class="footer-note no-print">※ 쿡앤셰프(Cook&Chef) 조회수 및 방문자 데이터는 GA4 API를 통해 실시간으로 집계되었습니다.</div>', unsafe_allow_html=True)
-
-# ----------------- 인쇄 로직 (수정됨) -----------------
-# 수정 사항: 
-# 1. 복잡한 DOM 복사 대신 브라우저 네이티브 인쇄(window.print) 사용
-# 2. iframe 내부가 아닌 부모 창(window.parent)을 호출하여 에러 해결
-# 3. Plotly 차트 깨짐 방지
-
-if print_btn:
-    js_print = """
-    <script>
-        // iframe 안에서 실행되므로 부모 창(메인 앱)에 인쇄 명령을 내려야 합니다.
-        window.parent.print();
-    </script>
-    """
-    components.html(js_print, height=0, width=0)
