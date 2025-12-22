@@ -6,7 +6,7 @@ import plotly.graph_objects as go
 import numpy as np
 import requests
 import re
-import concurrent.futures # 병렬 처리를 위한 모듈
+import concurrent.futures
 from bs4 import BeautifulSoup
 from datetime import datetime, timedelta
 
@@ -14,10 +14,10 @@ from datetime import datetime, timedelta
 from google.oauth2 import service_account 
 from google.analytics.data_v1beta import BetaAnalyticsDataClient
 from google.analytics.data_v1beta.types import (
-    DateRange, Dimension, Metric, RunReportRequest, OrderBy
+    DateRange, Dimension, Metric, RunReportRequest, OrderBy, FilterExpression, Filter
 )
 
-# ----------------- 1. 페이지 설정 (가장 먼저 실행) -----------------
+# ----------------- 1. 페이지 설정 -----------------
 st.set_page_config(
     layout="wide", 
     page_title="쿡앤셰프 주간 성과보고서", 
@@ -25,7 +25,7 @@ st.set_page_config(
     initial_sidebar_state="collapsed"
 )
 
-# ----------------- 2. CSS 스타일 정의 (인쇄 오류 수정) -----------------
+# ----------------- 2. CSS 스타일 정의 (인쇄 공란 해결 강화) -----------------
 COLOR_NAVY = "#1a237e"
 COLOR_RED = "#d32f2f"
 COLOR_GREY = "#78909c"
@@ -39,7 +39,7 @@ CSS = f"""
 @import url('https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.8/dist/web/static/pretendard.css');
 body {{ background-color: #ffffff; font-family: 'Pretendard', sans-serif; color: #263238; }}
 
-/* 화면 상단 여백 및 헤더 숨김 */
+/* 헤더 및 툴바 숨김 */
 header[data-testid="stHeader"] {{ visibility: hidden !important; }}
 [data-testid="stToolbar"] {{ visibility: hidden !important; }}
 .block-container {{ padding-top: 2rem !important; padding-bottom: 5rem; max_width: 1600px; }}
@@ -64,42 +64,43 @@ header[data-testid="stHeader"] {{ visibility: hidden !important; }}
 [data-testid="stDataFrame"] thead th {{ background-color: {COLOR_NAVY} !important; color: white !important; font-size: 1rem !important; font-weight: 600 !important; }}
 .footer-note {{ font-size: 0.85rem; color: #78909c; margin-top: 50px; border-top: 1px solid #eceff1; padding-top: 15px; text-align: center; }}
 
-/* ▼ 인쇄 모드 핵심 수정 (잘림 방지) ▼ */
+/* ▼ 인쇄 모드 강력 수정 ▼ */
 @media print {{
     @page {{ size: A4; margin: 10mm; }}
     
-    /* 1. 모든 컨테이너의 높이 제한 해제 및 스크롤 제거 */
-    html, body, [class*="ViewContainer"], [class*="appview-container"], [class*="main-container-"], [data-testid="stAppViewContainer"], [data-testid="stApp"] {{
+    /* 1. 화면 높이 강제 해제 (스크롤 문제 해결의 핵심) */
+    html, body, [data-testid="stAppViewContainer"], [data-testid="stApp"], .main, .block-container {{
         height: auto !important;
-        width: 100% !important;
+        min-height: 100% !important;
         overflow: visible !important;
+        display: block !important;
         position: static !important;
     }}
     
-    /* 2. 인쇄 시 불필요한 요소 숨김 */
-    header, footer, [data-testid="stSidebar"], [data-testid="stHeader"], [data-testid="stToolbar"], .stDeployButton, .no-print {{
+    /* 2. 인쇄 시 숨길 요소들 */
+    header, footer, [data-testid="stSidebar"], [data-testid="stHeader"], [data-testid="stToolbar"], .stDeployButton, .no-print, .print-btn-container {{
         display: none !important;
     }}
     
-    /* 3. 인쇄 버튼 자체도 숨김 (종이에 안 나오게) */
-    button, .print-btn-container {{
-        display: none !important;
-    }}
-    
-    /* 4. 콘텐츠 영역 확장 */
-    .block-container, .main {{
+    /* 3. 컨텐츠 너비 확장 */
+    .block-container {{
         max-width: 100% !important;
         width: 100% !important;
         padding: 0 !important;
         margin: 0 !important;
     }}
     
-    /* 기타 조정 */
-    .stTabs [data-baseweb="tab-list"] {{ display: none !important; }}
-    .section-header-container {{ break-before: page; page-break-before: always; margin-top: 0 !important; }}
+    /* 4. 강제 페이지 넘김 설정 */
+    .section-header-container {{ break-before: page; page-break-before: always; margin-top: 20px !important; }}
     .first-section {{ break-before: auto !important; page-break-before: auto !important; }}
+    
+    /* 5. 탭 메뉴 숨기기 */
+    .stTabs [data-baseweb="tab-list"] {{ display: none !important; }}
+    
+    /* 6. 그래프 깨짐 방지 */
     .stPlotlyChart {{ width: 100% !important; break-inside: avoid; page-break-inside: avoid; }}
     
+    /* 7. 하단 푸터 */
     .print-footer {{
         position: fixed; bottom: 0; left: 0; width: 100%; text-align: center; font-size: 10px; color: #999;
         border-top: 1px solid #ddd; padding-top: 5px; background-color: white; z-index: 9999;
@@ -123,6 +124,7 @@ def check_password():
             <style>
             .login-container { max-width: 400px; margin: 100px auto; padding: 40px; text-align: center; }
             .login-title { font-size: 24px; font-weight: 700; color: #1a237e; margin-bottom: 20px; text-align: center; }
+            .powered-by { font-size: 12px; color: #90a4ae; margin-top: 50px; font-weight: 500; }
             .stTextInput > div > div > input { text-align: center; font-size: 18px; letter-spacing: 2px; }
             </style>
             """, unsafe_allow_html=True
@@ -139,13 +141,17 @@ def check_password():
                     st.rerun()
                 else:
                     st.error("🚫 코드가 올바르지 않습니다.")
+            
+            # [요청 반영] Powered by DWG Inc.
+            st.markdown('<div class="powered-by">Powered by DWG Inc.</div>', unsafe_allow_html=True)
+            
     return False
 
 if not check_password():
     st.stop()
 
 # =================================================================
-# ▼ 메인 로직 시작 (로그인 성공 후) ▼
+# ▼ 메인 로직 시작 ▼
 # =================================================================
 
 PROPERTY_ID = "370663478" 
@@ -166,7 +172,7 @@ def clean_author_name(name):
     name = name.replace('#', '').replace('기자', '')
     return ' '.join(name.split())
 
-# [속도 개선] 크롤링 함수
+# [크롤링] 기사 정보 가져오기
 def crawl_single_article(url_path):
     full_url = f"http://www.cooknchefnews.com{url_path}"
     try:
@@ -181,6 +187,7 @@ def crawl_single_article(url_path):
                 if '기자' in txt and len(txt) < 10:
                     author = txt; break
         author = clean_author_name(author)
+        # 좋아요/댓글 실데이터 추출
         likes = int(soup.select_one('.sns-like-count').text.replace(',', '')) if soup.select_one('.sns-like-count') else 0
         comments = int(soup.select_one('.comment-count').text.replace(',', '')) if soup.select_one('.comment-count') else 0
         cat, subcat = "뉴스", "이슈"
@@ -245,6 +252,7 @@ def create_donut_chart_with_val(df, names, values, color_map=None):
     fig.update_layout(showlegend=False, margin=dict(t=30, b=80, l=40, r=40), height=350)
     return fig
 
+# 데이터 로딩 함수 (모두 실데이터로 변경)
 @st.cache_data(ttl=3600, show_spinner="데이터 불러오는 중...")
 def load_all_dashboard_data(selected_week):
     dr = WEEK_MAP[selected_week]
@@ -261,22 +269,23 @@ def load_all_dashboard_data(selected_week):
     else: sel_uv, sel_pv, sel_new = 0, 0, 0
     new_visitor_ratio = round((sel_new / sel_uv * 100), 1) if sel_uv > 0 else 0
 
-    # 2. 일별
+    # 2. 일별 데이터
     df_daily = run_ga4_report(s_dt, e_dt, ["date"], ["activeUsers", "screenPageViews"])
     if not df_daily.empty:
         df_daily = df_daily.rename(columns={'date':'날짜', 'activeUsers':'UV', 'screenPageViews':'PV'})
         df_daily['날짜'] = pd.to_datetime(df_daily['날짜']).dt.strftime('%m-%d')
     
-    # 3. 3개월 추이 (병렬)
+    # 3. 3개월 추이 (병렬) - [실데이터] '발행기사수' 삭제 -> '활성기사수'(PagePath 수)로 대체
     def fetch_week_data(week_label, date_str):
         ws, we = date_str.split(' ~ ')[0].replace('.', '-'), date_str.split(' ~ ')[1].replace('.', '-')
+        # 3가지 지표를 한 번에 가져옴 (activeUsers, screenPageViews)
+        # 활성 페이지 수는 GA4 API limit으로 인해 정확히 세기 어려우므로 여기서는 activeUsers와 screenPageViews만 사용
         res = run_ga4_report(ws, we, [], ["activeUsers", "screenPageViews"])
         if not res.empty:
             return {
                 '주차': week_label, 
                 'UV': int(res['activeUsers'][0]), 
-                'PV': int(res['screenPageViews'][0]),
-                '발행기사수': 130 + (int(res['activeUsers'][0]) // 450) + np.random.randint(-10, 15)
+                'PV': int(res['screenPageViews'][0])
             }
         return None
 
@@ -288,6 +297,12 @@ def load_all_dashboard_data(selected_week):
     if not df_weekly.empty:
         df_weekly['week_num'] = df_weekly['주차'].apply(lambda x: int(re.search(r'\d+', x).group()))
         df_weekly = df_weekly.sort_values('week_num')
+    
+    # [추가] 이번 주 활성 기사 수 (조회수가 발생한 페이지 경로 수 - 실데이터)
+    # limit=10000으로 충분히 가져와서 count
+    df_pages_count = run_ga4_report(s_dt, e_dt, ["pagePath"], ["screenPageViews"], limit=10000)
+    # 실제 기사 패턴(/news/articleView.html)만 필터링
+    active_article_count = df_pages_count[df_pages_count['pagePath'].str.contains('articleView', na=False)].shape[0]
 
     # 4. 유입경로
     def map_source(s):
@@ -350,11 +365,15 @@ def load_all_dashboard_data(selected_week):
         df_gender_curr = d_gc.dropna(subset=['mapped']).groupby('구분', as_index=False)['activeUsers'].sum() if not d_gc.empty else pd.DataFrame()
         df_gender_last = d_gl.dropna(subset=['mapped']).groupby('구분', as_index=False)['activeUsers'].sum() if not d_gl.empty else pd.DataFrame()
 
-    # 6. TOP 10 및 크롤링
+    # 6. TOP 10 및 크롤링 (실데이터)
+    # [수정] 랜덤 데이터를 제거하기 위해 기기별 카테고리(mobile/desktop) 등 실데이터를 추가 호출
+    # 여기서는 'deviceCategory'를 추가로 부르지 않고, Top 10을 먼저 부른 뒤
+    # 랜덤값이었던 '시간대별'과 '스크롤'을 -> '평균 체류 시간(engagement)'과 '이탈률'로 활용 (이미 GA4에 있음)
     df_raw_top = run_ga4_report(s_dt, e_dt, ["pageTitle", "pagePath"], ["screenPageViews", "activeUsers", "userEngagementDuration", "bounceRate"], "screenPageViews", limit=100)
     
     if not df_raw_top.empty:
         paths = df_raw_top['pagePath'].tolist()
+        # [크롤링 병렬 처리]
         with concurrent.futures.ThreadPoolExecutor(max_workers=20) as executor:
             scraped_data = list(executor.map(crawl_single_article, paths))
         
@@ -370,28 +389,38 @@ def load_all_dashboard_data(selected_week):
             return False
             
         exclude_mask = df_raw_top.apply(is_excluded, axis=1)
-        df_top10 = df_raw_top[~exclude_mask].copy()
-        df_top10 = df_top10.sort_values('screenPageViews', ascending=False).head(10)
+        # 기자별 분석을 위해 전체 데이터 보존 (df_raw_all)
+        df_raw_all = df_raw_top[~exclude_mask].copy()
+        
+        # Top 10 추출
+        df_top10 = df_raw_all.sort_values('screenPageViews', ascending=False).head(10)
         df_top10['순위'] = range(1, len(df_top10)+1)
         df_top10 = df_top10.rename(columns={'pageTitle': '제목', 'pagePath': '경로', 'screenPageViews': '전체조회수', 'activeUsers': '전체방문자수', 'userEngagementDuration': '평균체류시간', 'bounceRate': '이탈률'})
-        df_top10['스크롤90%'] = (df_top10['전체조회수'].astype(int) * 0.72).astype(int)
-        df_top10['12시간'] = (df_top10['전체조회수'].astype(int)*0.4).astype(int)
-        df_top10['24시간'] = (df_top10['전체조회수'].astype(int)*0.7).astype(int)
-        df_top10['48시간'] = df_top10['전체조회수'].astype(int)
+        
+        # [실데이터 적용] 랜덤 시간대 데이터 삭제 -> 실데이터로 대체
+        # 평균 체류 시간을 분:초 형태로 변환
+        def format_duration(sec):
+            m, s = divmod(int(sec), 60)
+            return f"{m}분 {s}초"
+        df_top10['체류시간_fmt'] = df_top10['평균체류시간'].apply(format_duration)
+        
         df_top10['발행일시'] = s_dt
         df_top10['신규방문자비율'] = f"{new_visitor_ratio}%"
-    else: df_top10 = pd.DataFrame()
+    else: 
+        df_top10 = pd.DataFrame()
+        df_raw_all = pd.DataFrame()
 
     return (sel_uv, sel_pv, df_daily, df_weekly, df_traffic_curr, df_traffic_last, 
-            df_region_curr, df_region_last, df_age_curr, df_age_last, df_gender_curr, df_gender_last, df_top10, 
-            new_visitor_ratio, search_inflow_ratio)
+            df_region_curr, df_region_last, df_age_curr, df_age_last, df_gender_curr, df_gender_last, df_top10, df_raw_all, 
+            new_visitor_ratio, search_inflow_ratio, active_article_count)
 
 # ----------------- 렌더링 함수들 -----------------
-def render_summary(df_weekly, cur_pv, cur_uv, new_ratio, search_ratio, df_daily):
+def render_summary(df_weekly, cur_pv, cur_uv, new_ratio, search_ratio, df_daily, active_article_count):
     st.markdown('<div class="section-header-container first-section"><div class="section-header">1. 주간 전체 성과 요약</div></div>', unsafe_allow_html=True)
     pv_per_user = round(cur_pv/cur_uv, 1) if cur_uv > 0 else 0
-    art_count = df_weekly['발행기사수'].iloc[-1] if not df_weekly.empty else 0
-    kpis = [("주간 발행기사수", art_count, "건"), ("주간 전체 조회수(PV)", cur_pv, "건"), ("주간 총 방문자수(UV)", cur_uv, "명"), 
+    
+    # [수정] 랜덤 발행기사수 -> 활성 기사 수 (실데이터)
+    kpis = [("활성 기사 수", active_article_count, "건"), ("주간 전체 조회수(PV)", cur_pv, "건"), ("주간 총 방문자수(UV)", cur_uv, "명"), 
             ("방문자당 페이지뷰", pv_per_user, "건"), ("신규 방문자 비율", new_ratio, "%"), ("검색 유입 비율", search_ratio, "%")]
     cols = st.columns(6)
     for i, (l, v, u) in enumerate(kpis):
@@ -409,8 +438,8 @@ def render_summary(df_weekly, cur_pv, cur_uv, new_ratio, search_ratio, df_daily)
             fig2 = go.Figure()
             fig2.add_trace(go.Bar(x=df_weekly['주차'], y=df_weekly['UV'], name='UV', marker_color=COLOR_GREY))
             fig2.add_trace(go.Bar(x=df_weekly['주차'], y=df_weekly['PV'], name='PV', marker_color=COLOR_NAVY))
-            fig2.add_trace(go.Scatter(x=df_weekly['주차'], y=df_weekly['발행기사수'], name='기사수', yaxis='y2', line=dict(color=COLOR_RED, width=3)))
-            fig2.update_layout(yaxis2=dict(overlaying='y', side='right'), barmode='group', plot_bgcolor='white', margin=dict(t=0))
+            # 발행기사수 라인 삭제 (정확한 과거 데이터 없으므로)
+            fig2.update_layout(barmode='group', plot_bgcolor='white', margin=dict(t=0))
             st.plotly_chart(fig2, use_container_width=True)
 
 def render_traffic(df_traffic_curr, df_traffic_last):
@@ -462,24 +491,20 @@ def render_top10_detail(df_top10):
     if not df_top10.empty:
         df_p4 = df_top10.copy()
         df_p4['이탈률'] = df_p4['이탈률'].apply(lambda x: f"{float(x):.1f}%" if str(x).replace('.','').replace('-','').isdigit() else x)
-        for c in ['전체조회수','전체방문자수','좋아요','댓글','스크롤90%']: 
+        for c in ['전체조회수','전체방문자수','좋아요','댓글']: 
             df_p4[c] = df_p4[c].apply(lambda x: f"{int(x):,}" if str(x).replace('.','').isdigit() else x)
-        st.dataframe(df_p4[['순위','카테고리','세부카테고리','제목','작성자','발행일시','전체조회수','전체방문자수','좋아요','댓글','평균체류시간','스크롤90%','신규방문자비율','이탈률']], use_container_width=True, hide_index=True)
+        # 스크롤 90% 제거 -> 체류시간으로 대체
+        st.dataframe(df_p4[['순위','카테고리','세부카테고리','제목','작성자','발행일시','전체조회수','전체방문자수','좋아요','댓글','체류시간_fmt','신규방문자비율','이탈률']], use_container_width=True, hide_index=True)
 
 def render_top10_trends(df_top10):
-    st.markdown('<div class="section-header-container"><div class="section-header">5. TOP 10 기사 시간대별 조회수 추이</div></div>', unsafe_allow_html=True)
+    # [수정] 랜덤 시간대 그래프 제거 -> 상위 기사 Top 5 비교 그래프
+    st.markdown('<div class="section-header-container"><div class="section-header">5. TOP 5 기사 조회수 비교</div></div>', unsafe_allow_html=True)
     if not df_top10.empty:
-        df_p5 = df_top10.copy()
-        for c in ['전체조회수','12시간','24시간','48시간']: 
-            df_p5[c] = df_p5[c].apply(lambda x: f"{int(x):,}" if str(x).replace('.','').isdigit() else x)
-        st.dataframe(df_p5[['순위', '제목', '작성자', '발행일시', '전체조회수', '12시간', '24시간', '48시간']], use_container_width=True, hide_index=True)
-        df_chart = df_top10.head(5)
-        top5_data = []
-        for _, r in df_chart.iterrows():
-            ttl = (r['제목'][:12]+'..') if len(r['제목'])>12 else r['제목']
-            for ch, rt in zip(['네이버','구글','SNS','기타'], [0.45, 0.2, 0.2, 0.15]): 
-                top5_data.append({'기사제목':ttl, '유입경로':ch, '조회수':int(r['전체조회수']*rt)})
-        st.plotly_chart(px.bar(pd.DataFrame(top5_data), y='기사제목', x='조회수', color='유입경로', orientation='h', color_discrete_sequence=CHART_PALETTE), use_container_width=True)
+        df_chart = df_top10.head(5).copy()
+        df_chart['기사제목'] = df_chart['제목'].apply(lambda x: x[:15]+'..' if len(x)>15 else x)
+        fig = px.bar(df_chart, y='기사제목', x='전체조회수', orientation='h', text='전체조회수', color='전체조회수', color_continuous_scale='Blues')
+        fig.update_layout(yaxis=dict(autorange="reversed"))
+        st.plotly_chart(fig, use_container_width=True)
 
 def render_category(df_top10):
     st.markdown('<div class="section-header-container"><div class="section-header">6. 카테고리별 분석</div></div>', unsafe_allow_html=True)
@@ -500,16 +525,25 @@ def render_category(df_top10):
         st.plotly_chart(px.bar(cat_sub, x='세부카테고리', y='기사수', text_auto=True, color='카테고리', color_discrete_sequence=CHART_PALETTE).update_layout(plot_bgcolor='white'), use_container_width=True)
         st.dataframe(cat_sub, use_container_width=True, hide_index=True)
 
-def get_writers_df(df_top10):
+# [수정] 랜덤 제거 -> 크롤링 된 전체 데이터(df_raw_all)에서 합산
+def get_writers_df_real(df_raw_all):
     pen_data = [{'필명':'맛객', '본명':'이경엽'}, {'필명':'Chef J', '본명':'조용수'}, {'필명':'푸드헌터', '본명':'김철호'}, {'필명':'Dr.Kim', '본명':'안정미'}]
     real_to_pen_map = {item['본명']: item['필명'] for item in pen_data}
-    if df_top10.empty: return pd.DataFrame()
-    writers = df_top10.groupby('작성자').agg(기사수=('제목','count'), 총조회수=('전체조회수','sum')).reset_index().sort_values('총조회수', ascending=False)
+    
+    if df_raw_all.empty: return pd.DataFrame()
+    
+    # 랜덤 값 대신 실제 합산
+    writers = df_raw_all.groupby('작성자').agg(
+        기사수=('제목','count'), 
+        총조회수=('전체조회수','sum'),
+        좋아요=('좋아요', 'sum'),
+        댓글=('댓글', 'sum')
+    ).reset_index().sort_values('총조회수', ascending=False)
+    
     writers['순위'] = range(1, len(writers)+1)
     writers['필명'] = writers['작성자'].map(real_to_pen_map).fillna('')
     writers['평균조회수'] = (writers['총조회수']/writers['기사수']).astype(int)
-    writers['좋아요'] = np.random.randint(50, 500, len(writers))
-    writers['댓글'] = np.random.randint(10, 100, len(writers))
+    
     return writers
 
 def render_writer_real(writers_df):
@@ -541,7 +575,7 @@ with c1: st.markdown('<div class="report-title">📰 쿡앤셰프 주간 성과�
 with c2: 
     print_mode = st.toggle("🖨️ 인쇄 모드 (모든 탭 펼치기)", value=False)
     if print_mode:
-        # [수정] 인쇄 버튼에 딜레이(500ms) 추가하여 렌더링 후 인쇄창 띄움
+        # 인쇄 버튼: 약간의 지연 시간(500ms)을 주어 렌더링 확보
         components.html(
             """
             <div class="print-btn-container">
@@ -556,14 +590,16 @@ with c2:
 st.markdown(f'<div class="period-info">📅 조회 기간: {WEEK_MAP[selected_week]}</div>', unsafe_allow_html=True)
 st.markdown(f"<div class='update-time'>최종 집계: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}</div>", unsafe_allow_html=True)
 
-# 데이터 로드
+# 데이터 로드 (active_article_count 추가됨)
 (cur_uv, cur_pv, df_daily, df_weekly, df_traffic_curr, df_traffic_last, 
- df_region_curr, df_region_last, df_age_curr, df_age_last, df_gender_curr, df_gender_last, df_top10,
- new_ratio, search_ratio) = load_all_dashboard_data(selected_week)
-writers_df = get_writers_df(df_top10)
+ df_region_curr, df_region_last, df_age_curr, df_age_last, df_gender_curr, df_gender_last, 
+ df_top10, df_raw_all, new_ratio, search_ratio, active_article_count) = load_all_dashboard_data(selected_week)
+
+# 기자 분석은 전체 크롤링 데이터 기반으로
+writers_df = get_writers_df_real(df_raw_all)
 
 if print_mode:
-    render_summary(df_weekly, cur_pv, cur_uv, new_ratio, search_ratio, df_daily)
+    render_summary(df_weekly, cur_pv, cur_uv, new_ratio, search_ratio, df_daily, active_article_count)
     render_traffic(df_traffic_curr, df_traffic_last)
     render_demographics(df_region_curr, df_region_last, df_age_curr, df_age_last, df_gender_curr, df_gender_last)
     render_top10_detail(df_top10)
@@ -573,7 +609,7 @@ if print_mode:
     render_writer_pen(writers_df)
 else:
     tabs = st.tabs(["1.성과요약", "2.접근경로", "3.방문자특성", "4.Top10상세", "5.Top10추이", "6.카테고리", "7.기자(본명)", "8.기자(필명)"])
-    with tabs[0]: render_summary(df_weekly, cur_pv, cur_uv, new_ratio, search_ratio, df_daily)
+    with tabs[0]: render_summary(df_weekly, cur_pv, cur_uv, new_ratio, search_ratio, df_daily, active_article_count)
     with tabs[1]: render_traffic(df_traffic_curr, df_traffic_last)
     with tabs[2]: render_demographics(df_region_curr, df_region_last, df_age_curr, df_age_last, df_gender_curr, df_gender_last)
     with tabs[3]: render_top10_detail(df_top10)
