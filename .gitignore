@@ -1,0 +1,11 @@
+# 보안 파일은 절대 올리지 않음
+cnc_backend.py
+cnc_backend.c
+
+# 단, 컴파일된 파일은 올림 (예외 처리)
+!*.pyd
+!*.so
+
+# (중요) 인증 키 파일도 절대 올리면 안 됨
+secrets.toml
+*.json
