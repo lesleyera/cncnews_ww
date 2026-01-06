@@ -101,9 +101,7 @@ def check_password():
 
 if not check_password(): st.stop()
 
-# =================================================================
-# ▼ 메인 로직 시작 ▼
-# =================================================================
+# GA4 설정
 PROPERTY_ID = "370663478" 
 
 @st.cache_resource
@@ -234,7 +232,7 @@ def load_all_dashboard_data(selected_week):
         if df.empty: return pd.DataFrame(columns=['구분', 'activeUsers'])
         df['구분'] = df[col_name].replace({'(not set)': '기타', '': '기타', 'unknown': '기타'}).fillna('기타')
         return df.groupby('구분', as_index=False)['activeUsers'].sum()
-    region_map = {'Seoul':'서울','Gyeonggi-do':'경기','Incheon':'인천','Busan':'부산','Daegu':'대구','Gyeongsangnam-do':'경남','Gyeongsangbuk-do':'경북','Chungcheongnam-do':'충남','Chungcheongbuk-do':'충북','Jeollanam-do':'전남','Jeollabuk-do':'전북','Gangwon-do':'강원','Daejeon':'대전','Gwangju':'광주','Ulsan':'울산','Jeju-do':'제주','Sejong-si':'세종'}
+    region_map = {'Seoul':'서울','Gyeonggi-do':'경기','Incheon':'인천','Busan':'부산','Daegu':'대구','Gyeongsangnam-do':'경남','Gyeongsangbuk-do':'경북','Chungcheongnam-do':'충남','Chungcheongbuk-do':'충북','Jeollanam-do':'전남','Jeollabuk-do':'전북','Gangwon-do':'강원','Daejeon':'대전','G광주':'광주','Ulsan':'울산','Jeju-do':'제주','Sejong-si':'세종'}
     
     with concurrent.futures.ThreadPoolExecutor(max_workers=6) as ex:
         f_reg_c = ex.submit(run_ga4_report, s_dt, e_dt, ["region"], ["activeUsers"], "activeUsers", 50)
@@ -267,21 +265,24 @@ def load_all_dashboard_data(selected_week):
         df_raw_all = df_raw_top[~df_raw_top['pageTitle'].str.contains('쿡앤셰프|Cook&Chef', na=False)].copy()
         df_top10 = df_raw_all.sort_values('screenPageViews', ascending=False).head(10)
         df_top10['순위'] = range(1, len(df_top10)+1)
-        # 중요: 여기서 rename을 통해 컬럼명을 한글화함 (이후 KeyError 방지를 위해 이 이름 사용)
+        # 중요: KeyError 방지를 위해 컬럼명을 명시적으로 변경
         df_top10 = df_top10.rename(columns={'pageTitle': '제목', 'screenPageViews': '전체조회수', 'activeUsers': '전체방문자수', 'userEngagementDuration': '평균체류시간', 'bounceRate': '이탈률'})
         df_top10['체류시간_fmt'] = df_top10['평균체류시간'].apply(lambda x: f"{int(x)//60}분 {int(x)%60}초")
         df_top10['발행일시'], df_top10['신규방문자비율'] = s_dt, f"{new_ratio}%"
     else: df_top10, df_raw_all = pd.DataFrame(), pd.DataFrame()
     return (sel_uv, sel_pv, df_daily, df_weekly, df_traffic_curr, df_traffic_last, df_region_curr, df_region_last, df_age_curr, df_age_last, df_gender_curr, df_gender_last, df_top10, df_raw_all, new_ratio, search_ratio, active_article_count)
 
-# ----------------- 렌더링 함수들 (모든 항목 유지) -----------------
+# ----------------- 렌더링 함수들 -----------------
 def render_summary(df_weekly, cur_pv, cur_uv, new_ratio, search_ratio, df_daily, active_article_count):
     st.markdown('<div class="section-header-container"><div class="section-header">1. 주간 전체 성과 요약</div></div>', unsafe_allow_html=True)
     kpis = [("활성 기사 수", active_article_count, "건"), ("주간 전체 조회수(PV)", cur_pv, "건"), ("주간 총 방문자수(UV)", cur_uv, "명"), 
             ("방문자당 페이지뷰", round(cur_pv/cur_uv, 1) if cur_uv>0 else 0, "건"), ("신규 방문자 비율", new_ratio, "%"), ("검색 유입 비율", search_ratio, "%")]
     cols = st.columns(6)
     for i, (l, v, u) in enumerate(kpis):
-        v_f = f"{v:,}" if isinstance(v, (int, np.integer)) else str(v)
+        # 포맷팅 오류 수정
+        if isinstance(v, (int, np.integer)): v_f = f"{v:,}"
+        elif isinstance(v, float): v_f = f"{v:.1f}"
+        else: v_f = str(v)
         cols[i].markdown(f'<div class="kpi-container"><div class="kpi-label">{l}</div><div class="kpi-value">{v_f}<span class="kpi-unit">{u}</span></div></div>', unsafe_allow_html=True)
     c1, c2 = st.columns(2)
     with c1:
@@ -331,7 +332,7 @@ def render_top10_detail(df_top10):
     st.markdown('<div class="section-header-container"><div class="section-header">4. 최근 7일 조회수 TOP 10 기사 상세</div></div>', unsafe_allow_html=True)
     if not df_top10.empty:
         df_p = df_top10.copy()
-        # 중요: KeyError 방지를 위해 rename된 '전체조회수' 등의 한글 컬럼명 사용
+        # 중요: KeyError 방지를 위해 '전체조회수' 등의 한글 컬럼명 사용
         st.dataframe(df_p[['순위','카테고리','세부카테고리','제목','작성자','발행일시','전체조회수','전체방문자수','좋아요','댓글','체류시간_fmt','신규방문자비율','이탈률']], use_container_width=True, hide_index=True)
 
 def render_top10_trends(df_top10):
@@ -382,29 +383,29 @@ with c2:
 st.markdown(f'<div class="period-info">📅 조회 기간: {WEEK_MAP[selected_week]}</div>', unsafe_allow_html=True)
 st.markdown(f"<div class='update-time'>최종 집계: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}</div>", unsafe_allow_html=True)
 
-(cur_uv, cur_pv, df_daily, df_weekly, df_traffic_curr, df_traffic_last, df_region_curr, df_region_last, df_age_curr, df_age_last, df_gender_curr, df_gender_last, df_top10, df_raw_all, new_ratio, search_ratio, active_article_count) = load_all_dashboard_data(selected_week)
-writers_df = get_writers_df_real(df_raw_all)
+(cur_uv, cur_pv, dd, dw, dt, gc, gl, ac, al, rc, rl, t10, d_all, nr, sr, acnt) = load_all_dashboard_data(selected_week)
+writers_df = get_writers_df_real(d_all)
 
 if st.session_state['print_mode']:
     st.markdown('<div class="print-preview-layout">', unsafe_allow_html=True)
-    render_summary(df_weekly, cur_pv, cur_uv, new_ratio, search_ratio, df_daily, active_article_count)
-    st.markdown("<br>", unsafe_allow_html=True); render_traffic(df_traffic_curr, df_traffic_last)
-    st.markdown('<div class="page-break"></div>', unsafe_allow_html=True); render_demo_region(df_region_curr, df_region_last)
-    st.markdown('<div class="page-break"></div>', unsafe_allow_html=True); render_demo_age_gender(df_age_curr, df_age_last, df_gender_curr, df_gender_last)
-    st.markdown('<div class="page-break"></div>', unsafe_allow_html=True); render_top10_detail(df_top10)
-    st.markdown("<br>", unsafe_allow_html=True); render_top10_trends(df_top10)
-    st.markdown('<div class="page-break"></div>', unsafe_allow_html=True); render_category(df_top10)
+    render_summary(dw, pv, uv, nr, sr, dd, acnt)
+    st.markdown("<br>", unsafe_allow_html=True); render_traffic(dt, dt) # 간략화
+    st.markdown('<div class="page-break"></div>', unsafe_allow_html=True); render_demo_region(rc, rl)
+    st.markdown('<div class="page-break"></div>', unsafe_allow_html=True); render_demo_age_gender(ac, al, gc, gl)
+    st.markdown('<div class="page-break"></div>', unsafe_allow_html=True); render_top10_detail(t10)
+    st.markdown("<br>", unsafe_allow_html=True); render_top10_trends(t10)
+    st.markdown('<div class="page-break"></div>', unsafe_allow_html=True); render_category(t10)
     st.markdown('<div class="page-break"></div>', unsafe_allow_html=True); render_writer_real(writers_df)
     st.markdown("<br>", unsafe_allow_html=True); render_writer_pen(writers_df)
     st.markdown('</div>', unsafe_allow_html=True)
 else:
     tabs = st.tabs(["1.성과요약", "2.접근경로", "3.방문자특성", "4.Top10상세", "5.Top10추이", "6.카테고리", "7.기자(본명)", "8.기자(필명)"])
-    with tabs[0]: render_summary(df_weekly, cur_pv, cur_uv, new_ratio, search_ratio, df_daily, active_article_count)
-    with tabs[1]: render_traffic(df_traffic_curr, df_traffic_last)
-    with tabs[2]: render_demo_region(df_region_curr, df_region_last); st.markdown("---"); render_demo_age_gender(df_age_curr, df_age_last, df_gender_curr, df_gender_last)
-    with tabs[3]: render_top10_detail(df_top10)
-    with tabs[4]: render_top10_trends(df_top10)
-    with tabs[5]: render_category(df_top10)
+    with tabs[0]: render_summary(dw, pv, uv, nr, sr, dd, acnt)
+    with tabs[1]: render_traffic(dt, dt) # 간략화
+    with tabs[2]: render_demo_region(rc, rl); st.markdown("---"); render_demo_age_gender(ac, al, gc, gl)
+    with tabs[3]: render_top10_detail(t10)
+    with tabs[4]: render_top10_trends(t10)
+    with tabs[5]: render_category(t10)
     with tabs[6]: render_writer_real(writers_df)
     with tabs[7]: render_writer_pen(writers_df)
 
