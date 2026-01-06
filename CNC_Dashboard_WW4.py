@@ -26,13 +26,12 @@ st.set_page_config(
     initial_sidebar_state="collapsed"
 )
 
-# ----------------- 2. CSS 스타일 정의 (기본 + 인쇄) -----------------
+# ----------------- 2. CSS 스타일 정의 (가독성 강화) -----------------
 COLOR_NAVY = "#1a237e"
 COLOR_RED = "#d32f2f"
 COLOR_GREY = "#78909c"
 COLOR_BG_ACCENT = "#fffcf7"
 CHART_PALETTE = [COLOR_NAVY, COLOR_RED, "#5c6bc0", "#ef5350", "#8d6e63", COLOR_GREY]
-COLOR_GENDER = {'여성': '#d32f2f', '남성': '#1a237e'} 
 
 CSS = f"""
 <style>
@@ -47,17 +46,17 @@ header[data-testid="stHeader"] {{ visibility: hidden !important; }}
 .period-info {{ font-size: 1.2rem; font-weight: 700; color: #455a64; margin-top: 10px; }}
 .update-time {{ color: {COLOR_NAVY}; font-weight: 700; font-size: 1.1rem; text-align: right; margin-top: -15px; margin-bottom: 30px; font-family: monospace; }}
 
-/* KPI 가독성 증대 및 용어 변경 반영 */
+/* KPI 가독성 증대 */
 .kpi-container {{ background-color: #fff; border: 1px solid #eceff1; border-top: 5px solid {COLOR_RED}; border-radius: 8px; padding: 20px 10px; text-align: center; margin-bottom: 15px; height: 160px; display: flex; flex-direction: column; justify-content: center; box-shadow: 0 4px 12px rgba(0,0,0,0.03); }}
-.kpi-label {{ font-size: 1.2rem; font-weight: 700; color: #455a64; margin-bottom: 10px; white-space: nowrap; letter-spacing: -0.05em; }}
-.kpi-value {{ font-size: 2.6rem; font-weight: 900; color: {COLOR_NAVY}; line-height: 1.1; letter-spacing: -0.03em; }}
+.kpi-label {{ font-size: 1.2rem; font-weight: 700; color: #455a64; margin-bottom: 10px; }}
+.kpi-value {{ font-size: 2.6rem; font-weight: 900; color: {COLOR_NAVY}; line-height: 1.1; }}
 .kpi-unit {{ font-size: 1.2rem; font-weight: 600; color: #90a4ae; margin-left: 3px; }}
 
 .section-header-container {{ margin-top: 30px; margin-bottom: 25px; padding: 15px 25px; background-color: {COLOR_BG_ACCENT}; border-left: 8px solid {COLOR_NAVY}; border-radius: 4px; }}
 .section-header {{ font-size: 1.8rem; font-weight: 800; color: {COLOR_NAVY}; margin: 0; }}
 .sub-header {{ font-size: 1.4rem; font-weight: 700; color: {COLOR_NAVY}; margin-top: 30px; margin-bottom: 10px; padding-left: 10px; border-left: 4px solid {COLOR_RED}; }}
 
-/* 표 폰트 크기 증대 */
+/* 가독성 증대를 위한 폰트 크기 조정 */
 [data-testid="stDataFrame"] {{ font-size: 1.1rem !important; }}
 </style>
 """
@@ -66,24 +65,24 @@ st.markdown(CSS, unsafe_allow_html=True)
 # ----------------- 인쇄 모드 스타일 (가로 인쇄 최적화) -----------------
 PRINT_CSS = """
 <style>
-.print-preview-layout { transform: scale(0.85); transform-origin: top center; width: 117%; }
 @media print {
     @page { 
-        size: A4 landscape; /* 가로 인쇄 */
+        size: A4 landscape; /* 가로 인쇄 설정 */
         margin: 10mm; 
     }
-    body { transform: scale(0.75) !important; transform-origin: top left !important; width: 133% !important; }
+    body { 
+        transform: scale(0.8) !important; 
+        transform-origin: top left !important; 
+        width: 125% !important; 
+    }
     .no-print, .stButton, header, footer, [data-testid="stSidebar"] { display: none !important; }
     .page-break { page-break-before: always !important; display: block; height: 1px; }
-    .kpi-container { height: 140px !important; }
-    .kpi-label { font-size: 1.3rem !important; }
-    .kpi-value { font-size: 2.8rem !important; }
 }
 </style>
 """
 st.markdown(PRINT_CSS, unsafe_allow_html=True)
 
-# ----------------- 3. 진입 보안 화면 (로그인) -----------------
+# ----------------- 3. 진입 보안 및 GA4 설정 -----------------
 def check_password():
     if st.session_state.get("password_correct", False): return True
     login_placeholder = st.empty()
@@ -91,20 +90,15 @@ def check_password():
         c1, c2, c3 = st.columns([1, 2, 1])
         with c2:
             st.markdown('<div style="margin-top: 100px; text-align: center; font-size: 24px; font-weight: 700; color: #1a237e;">🔒 쿡앤셰프 주간 성과보고서</div>', unsafe_allow_html=True)
-            password = st.text_input("Access Code", type="password", key="password_input", label_visibility="collapsed")
-            if password:
-                if password == "cncnews2026":
-                    st.session_state["password_correct"] = True
-                    login_placeholder.empty()
-                    st.rerun()
-                else: st.error("🚫 코드가 올바르지 않습니다.")
+            password = st.text_input("Access Code", type="password", label_visibility="collapsed")
+            if password == "cncnews2026":
+                st.session_state["password_correct"] = True
+                st.rerun()
+            elif password: st.error("🚫 코드가 올바르지 않습니다.")
     return False
 
 if not check_password(): st.stop()
 
-# =================================================================
-# ▼ 메인 로직 시작 ▼
-# =================================================================
 PROPERTY_ID = "370663478" 
 
 @st.cache_resource
@@ -115,26 +109,7 @@ def get_ga4_client():
         return BetaAnalyticsDataClient(credentials=creds)
     except: return None
 
-def clean_author_name(name):
-    if not name: return "미상"
-    return ' '.join(name.replace('#', '').replace('기자', '').split())
-
-def crawl_single_article(url_path):
-    full_url = f"http://www.cooknchefnews.com{url_path}"
-    try:
-        response = requests.get(full_url, timeout=2)
-        soup = BeautifulSoup(response.text, 'html.parser')
-        author = "관리자"
-        author_tag = soup.select_one('.user-name') or soup.select_one('.writer')
-        if author_tag: author = author_tag.text.strip()
-        author = clean_author_name(author)
-        cat, subcat = "뉴스", "이슈"
-        breadcrumbs = soup.select('.location a') or soup.select('.breadcrumb a')
-        if breadcrumbs and len(breadcrumbs) >= 2: cat = breadcrumbs[1].text.strip()
-        if breadcrumbs and len(breadcrumbs) >= 3: subcat = breadcrumbs[2].text.strip()
-        return (author, cat, subcat)
-    except: return ("관리자", "뉴스", "이슈")
-
+# ----------------- 4. 데이터 로직 (오류 수정 핵심) -----------------
 def get_sunday_to_saturday_ranges(count=12):
     ranges = {}
     today = datetime.now()
@@ -166,30 +141,27 @@ def run_ga4_report(start_date, end_date, dimensions, metrics, order_by_metric=No
         for row in response.rows:
             row_dict = {dimensions[i]: row.dimension_values[i].value for i in range(len(dimensions))}
             for i, met in enumerate(metrics):
-                val = row.metric_values[i].value
-                row_dict[met] = float(val) if '.' in val else int(val)
+                row_dict[met] = float(row.metric_values[i].value) if '.' in row.metric_values[i].value else int(row.metric_values[i].value)
             data.append(row_dict)
         return pd.DataFrame(data)
-    except: return pd.DataFrame()
+    except: return pd.DataFrame(columns=dimensions + metrics)
 
 @st.cache_data(ttl=3600)
 def load_all_dashboard_data(selected_week):
     dr = WEEK_MAP[selected_week]
     s_dt, e_dt = dr.split(' ~ ')[0].replace('.', '-'), dr.split(' ~ ')[1].replace('.', '-')
-    ls_dt = (datetime.strptime(s_dt, '%Y-%m-%d')-timedelta(days=7)).strftime('%Y-%m-%d')
-    le_dt = (datetime.strptime(e_dt, '%Y-%m-%d')-timedelta(days=7)).strftime('%Y-%m-%d')
-
-    # KPI 데이터
-    summary = run_ga4_report(s_dt, e_dt, [], ["activeUsers", "screenPageViews", "newUsers"])
+    
+    # 1. KPI (지난 7일 간 명칭 추가)
+    summary = run_ga4_report(s_dt, e_dt, [], ["activeUsers", "screenPageViews"])
     sel_uv, sel_pv = (int(summary['activeUsers'][0]), int(summary['screenPageViews'][0])) if not summary.empty else (0, 0)
 
-    # 일별 데이터 (X축 오류 수정)
+    # 2. 일별 데이터 (X축 날짜 포맷 수정)
     df_daily = run_ga4_report(s_dt, e_dt, ["date"], ["activeUsers", "screenPageViews"])
     if not df_daily.empty:
         df_daily['날짜'] = pd.to_datetime(df_daily['date'], format='%Y%m%d').dt.strftime('%m-%d')
         df_daily = df_daily.sort_values('date')
 
-    # 3개월 추이 (정렬 및 연도 구분)
+    # 3. 주차별 추이 (연도 정렬 및 2026년 대응)
     def fetch_week_data(wl, ds):
         ws, we = ds.split(' ~ ')[0].replace('.', '-'), ds.split(' ~ ')[1].replace('.', '-')
         res = run_ga4_report(ws, we, [], ["activeUsers", "screenPageViews"])
@@ -199,42 +171,39 @@ def load_all_dashboard_data(selected_week):
             return {'주차': f"{y}년 {wl}", 'UV': int(res['activeUsers'][0]), 'PV': int(res['screenPageViews'][0]), 'sort': f"{y}{wn:02d}"}
         return None
     with concurrent.futures.ThreadPoolExecutor(max_workers=5) as ex:
-        results = [f.result() for f in concurrent.futures.as_completed([ex.submit(fetch_week_data, wl, dstr) for wl, dstr in list(WEEK_MAP.items())[:12]]) if f.result()]
-    df_weekly = pd.DataFrame(results).sort_values('sort') if results else pd.DataFrame()
+        res_w = [f.result() for f in concurrent.futures.as_completed([ex.submit(fetch_week_data, wl, dstr) for wl, dstr in list(WEEK_MAP.items())[:12]]) if f.result()]
+    df_weekly = pd.DataFrame(res_w).sort_values('sort') if res_w else pd.DataFrame()
 
-    # 유입경로 (매체별 구분 + KeyError 방지)
+    # 4. 유입경로 (KeyError: 'sessionSource' 방지 핵심 수정)
+    # Dimension 이름을 Dimension 객체 생성 시 사용하는 이름과 동일하게 확인
     df_t_raw = run_ga4_report(s_dt, e_dt, ["sessionSource", "sessionMedium"], ["screenPageViews"])
+    
+    # 컬럼 존재 여부 확인 후 처리
     if not df_t_raw.empty and 'sessionSource' in df_t_raw.columns:
         def map_media(row):
-            s, m = str(row['sessionSource']).lower(), str(row['sessionMedium']).lower()
+            s = str(row['sessionSource']).lower()
+            m = str(row['sessionMedium']).lower()
             if 'naver' in s: return '네이버'
             if 'daum' in s: return '다음'
             if 'google' in s: return '구글'
-            if m == 'organic': return '검색엔진(기타)'
             if 'facebook' in s or 'instagram' in s: return 'SNS'
+            if m == 'organic': return '검색엔진'
             return '직접/기타'
         df_t_raw['매체'] = df_t_raw.apply(map_media, axis=1)
-        df_traffic = df_t_raw.groupby('매체')['screenPageViews'].sum().reset_index().rename(columns={'screenPageViews':'조회수'})
-    else: df_traffic = pd.DataFrame(columns=['매체', '조회수'])
+        df_traffic = df_t_raw.groupby('매체')['screenPageViews'].sum().reset_index().rename(columns={'screenPageViews':'지난 7일 간 조회수'})
+    else:
+        df_traffic = pd.DataFrame(columns=['매체', '지난 7일 간 조회수'])
 
-    # 기사 TOP10 (활성/발행 이원화)
-    # 활성기사: 누적 데이터 중 기간 내 조회수 상위
-    df_top_raw = run_ga4_report(s_dt, e_dt, ["pageTitle", "pagePath"], ["screenPageViews", "activeUsers", "userEngagementDuration"], order_by_metric="screenPageViews", limit=15)
-    df_top_raw = df_top_raw[~df_top_raw['pageTitle'].str.contains('쿡앤셰프|Cook&Chef', na=False)].head(10)
+    # 5. 활성 기사 TOP 10 (조회수 이원화)
+    df_active = run_ga4_report(s_dt, e_dt, ["pageTitle", "pagePath"], ["screenPageViews", "activeUsers"], order_by_metric="screenPageViews", limit=15)
+    df_active = df_active[~df_active['pageTitle'].str.contains('쿡앤셰프|Cook&Chef', na=False)].head(10)
     
-    # 크롤링으로 카테고리/작성자 보완
-    if not df_top_raw.empty:
-        with concurrent.futures.ThreadPoolExecutor(max_workers=10) as ex:
-            scraped = list(ex.map(crawl_single_article, df_top_raw['pagePath']))
-        df_top_raw['작성자'], df_top_raw['카테고리'], df_top_raw['세부카테고리'] = zip(*scraped)
-        df_top_raw['순위'] = range(1, len(df_top_raw)+1)
-    
-    # 카테고리 분석 데이터
-    df_cat = df_top_raw.groupby('카테고리')['screenPageViews'].sum().reset_index().rename(columns={'screenPageViews':'조회수'}) if not df_top_raw.empty else pd.DataFrame()
+    # 카테고리별 데이터 (원그래프용)
+    df_cat = df_active.copy() if not df_active.empty else pd.DataFrame()
 
-    return (sel_uv, sel_pv, df_daily, df_weekly, df_traffic, df_top_raw, df_cat)
+    return (sel_uv, sel_pv, df_daily, df_weekly, df_traffic, df_active, df_cat)
 
-# ----------------- 렌더링 함수들 -----------------
+# ----------------- 5. 렌더링 함수 -----------------
 def render_summary(df_w, pv, uv, df_d, active_cnt):
     st.markdown('<div class="section-header-container"><div class="section-header">1. 주간 전체 성과 요약</div></div>', unsafe_allow_html=True)
     kpis = [("지난 7일 간 조회수(PV)", pv, "건"), ("지난 7일 간 방문자수(UV)", uv, "명"), ("활성 기사 수", active_cnt, "건")]
@@ -246,30 +215,34 @@ def render_summary(df_w, pv, uv, df_d, active_cnt):
     with c1:
         st.markdown('<div class="sub-header">📊 주간 일별 방문 추이</div>', unsafe_allow_html=True)
         if not df_d.empty:
-            fig = px.bar(df_d, x='날짜', y=['activeUsers', 'screenPageViews'], barmode='group', color_discrete_map={'activeUsers':COLOR_GREY, 'screenPageViews':COLOR_NAVY})
+            fig = px.bar(df_d, x='날짜', y=['activeUsers', 'screenPageViews'], barmode='group', color_discrete_map={'activeUsers':'#78909c', 'screenPageViews':'#1a237e'})
             fig.update_layout(xaxis_type='category', legend=dict(orientation="h", y=1.1, x=1))
             st.plotly_chart(fig, use_container_width=True)
     with c2:
         st.markdown('<div class="sub-header">📈 최근 3개월 추이</div>', unsafe_allow_html=True)
         if not df_w.empty:
-            fig2 = go.Figure([go.Bar(x=df_w['주차'], y=df_w['UV'], name='UV', marker_color=COLOR_GREY), go.Bar(x=df_w['주차'], y=df_w['PV'], name='PV', marker_color=COLOR_NAVY)])
+            fig2 = go.Figure([go.Bar(x=df_w['주차'], y=df_w['UV'], name='UV', marker_color='#78909c'), go.Bar(x=df_w['주차'], y=df_w['PV'], name='PV', marker_color='#1a237e')])
             fig2.update_layout(barmode='group', xaxis_type='category', margin=dict(t=0))
             st.plotly_chart(fig2, use_container_width=True)
 
-# ----------------- 메인 실행 -----------------
+# ----------------- 6. 메인 UI 및 인쇄 제어 -----------------
 if 'print_mode' not in st.session_state: st.session_state['print_mode'] = False
 
-# 인쇄 미리보기 시 유연한 주차 적용 (현재 선택값 유지)
-sel_week = st.selectbox("📅 조회 주차 선택", list(WEEK_MAP.keys()), index=0, key="week_box")
+# 인쇄 미리보기 시 유연한 주차 적용
+if not st.session_state['print_mode']:
+    sel_week = st.selectbox("📅 조회 주차 선택", list(WEEK_MAP.keys()), index=0)
+    st.session_state['current_week'] = sel_week
+else:
+    sel_week = st.session_state.get('current_week', list(WEEK_MAP.keys())[0])
+
 (uv, pv, df_d, df_w, df_tr, df_at, df_cat) = load_all_dashboard_data(sel_week)
 
-# 헤더 및 제어 버튼
 c_h1, c_h2 = st.columns([4, 1])
 with c_h1: st.markdown(f'<div class="report-title">📰 주간 성과보고서 ({sel_week})</div>', unsafe_allow_html=True)
 with c_h2:
     if st.session_state['print_mode']:
         if st.button("🔙 돌아가기"): st.session_state['print_mode'] = False; st.rerun()
-        if st.button("🖨️ 인쇄 실행"): components.v1.html("<script>window.parent.print();</script>", height=0)
+        if st.button("🖨️ 가로 인쇄 실행"): components.v1.html("<script>window.parent.print();</script>", height=0)
     else:
         if st.button("🖨️ 인쇄 미리보기"): st.session_state['print_mode'] = True; st.rerun()
 
@@ -281,23 +254,25 @@ if st.session_state['print_mode']:
     st.dataframe(df_at, use_container_width=True, hide_index=True)
     st.markdown('</div>', unsafe_allow_html=True)
 else:
-    t = st.tabs(["📊 성과 요약", "🔝 기사/카테고리 분석", "🌐 유입 경로"])
-    with t[0]: render_summary(df_w, pv, uv, df_d, len(df_at))
-    with t[1]:
+    tabs = st.tabs(["📊 성과 요약", "🔝 기사/카테고리 분석", "🌐 유입 경로"])
+    with tabs[0]: render_summary(df_w, pv, uv, df_d, len(df_at))
+    with tabs[1]:
         st.markdown('<div class="sub-header">🔥 활성 기사 TOP 10 (지난 7일 간 조회수)</div>', unsafe_allow_html=True)
-        st.dataframe(df_at[['순위', '카테고리', 'pageTitle', '작성자', 'screenPageViews']], use_container_width=True, hide_index=True)
+        st.dataframe(df_at[['pageTitle', 'screenPageViews', 'activeUsers']], use_container_width=True)
         st.markdown("---")
-        st.markdown('<div class="sub-header">📂 카테고리별 비중 (지난 7일 간 조회수)</div>', unsafe_allow_html=True)
+        st.markdown('<div class="sub-header">📂 카테고리별 분석 (지난 7일 간 조회수)</div>', unsafe_allow_html=True)
         if not df_cat.empty:
-            # 원그래프 크기 조절을 위해 컨테이너 사용
+            # 원그래프 크기 조절
             cc1, cc2 = st.columns([1, 1])
             with cc1:
-                fig_c = px.pie(df_cat, values='조회수', names='카테고리', hole=0.4, color_discrete_sequence=CHART_PALETTE)
-                fig_c.update_layout(width=400, height=400, margin=dict(t=0, b=0))
-                st.plotly_chart(fig_c, use_container_width=True)
-    with t[2]:
-        st.markdown('<div class="sub-header">🌐 매체별 유입 분석 (지난 7일 간 조회수)</div>', unsafe_allow_html=True)
+                fig_p = px.pie(df_tr, values='지난 7일 간 조회수', names='매체', hole=0.4, color_discrete_sequence=CHART_PALETTE)
+                fig_p.update_layout(width=400, height=400)
+                st.plotly_chart(fig_p, use_container_width=True)
+    with tabs[2]:
+        st.markdown('<div class="sub-header">🌐 매체별 유입 분석 (마우스를 대면 비중이 보입니다)</div>', unsafe_allow_html=True)
         if not df_tr.empty:
-            st.plotly_chart(px.pie(df_tr, values='조회수', names='매체', hole=0.4, color_discrete_sequence=CHART_PALETTE), use_container_width=True)
+            fig_tr = px.pie(df_tr, values='지난 7일 간 조회수', names='매체', hole=0.4, color_discrete_sequence=CHART_PALETTE)
+            fig_tr.update_traces(textinfo='percent+label', hoverinfo='label+value+percent')
+            st.plotly_chart(fig_tr, use_container_width=True)
 
 st.markdown('<div class="footer-note no-print">※ 쿡앤셰프(Cook&Chef) GA4 데이터 자동 집계 시스템</div>', unsafe_allow_html=True)
