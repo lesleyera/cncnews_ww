@@ -34,19 +34,14 @@ COLOR_BG_ACCENT = "#fffcf7"
 CHART_PALETTE = [COLOR_NAVY, COLOR_RED, "#5c6bc0", "#ef5350", "#8d6e63", COLOR_GREY]
 COLOR_GENDER = {'여성': '#d32f2f', '남성': '#1a237e'} 
 
-# 기본 화면 스타일
 CSS = f"""
 <style>
 @import url('https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.8/dist/web/static/pretendard.css');
 body {{ background-color: #ffffff; font-family: 'Pretendard', sans-serif; color: #263238; }}
-
-/* 헤더 및 툴바 숨김 */
 header[data-testid="stHeader"] {{ visibility: hidden !important; }}
 [data-testid="stToolbar"] {{ visibility: hidden !important; }}
 .block-container {{ padding-top: 2rem !important; padding-bottom: 5rem; max_width: 1600px; }}
 [data-testid="stSidebar"] {{ display: none; }}
-
-/* 보고서 스타일 */
 .report-title {{ font-size: 2.6rem; font-weight: 900; color: {COLOR_NAVY}; border-bottom: 4px solid {COLOR_RED}; padding-bottom: 15px; margin-top: 10px; }}
 .period-info {{ font-size: 1.2rem; font-weight: 700; color: #455a64; margin-top: 10px; }}
 .update-time {{ color: {COLOR_NAVY}; font-weight: 700; font-size: 1.1rem; text-align: right; margin-top: -15px; margin-bottom: 30px; font-family: monospace; }}
@@ -56,9 +51,7 @@ header[data-testid="stHeader"] {{ visibility: hidden !important; }}
 .kpi-unit {{ font-size: 1.1rem; font-weight: 600; color: #90a4ae; margin-left: 3px; }}
 .section-header-container {{ margin-top: 30px; margin-bottom: 25px; padding: 15px 25px; background-color: {COLOR_BG_ACCENT}; border-left: 8px solid {COLOR_NAVY}; border-radius: 4px; }}
 .section-header {{ font-size: 1.8rem; font-weight: 800; color: {COLOR_NAVY}; margin: 0; }}
-.section-desc {{ font-size: 1rem; color: #546e7a; margin-top: 5px; }}
 .sub-header {{ font-size: 1.3rem; font-weight: 700; color: {COLOR_NAVY}; margin-top: 30px; margin-bottom: 10px; padding-left: 10px; border-left: 4px solid {COLOR_RED}; }}
-.chart-header {{ font-size: 1.2rem; font-weight: 700; color: {COLOR_NAVY}; margin-top: 30px; margin-bottom: 10px; border-left: 4px solid {COLOR_RED}; padding-left: 10px; }}
 .stTabs [data-baseweb="tab-list"] {{ gap: 0px; border-bottom: 2px solid #cfd8dc; display: flex; width: 100%; }}
 .stTabs [data-baseweb="tab"] {{ height: 60px; background-color: #f7f9fa; border-right: 1px solid #eceff1; color: #607d8b; font-weight: 700; font-size: 1.1rem; flex-grow: 1; text-align: center; }}
 .stTabs [aria-selected="true"] {{ background-color: #fff; color: {COLOR_RED}; border-bottom: 4px solid {COLOR_RED}; }}
@@ -95,7 +88,7 @@ def check_password():
         c1, c2, c3 = st.columns([1, 2, 1])
         with c2:
             st.markdown('<div style="margin-top: 100px;"></div>', unsafe_allow_html=True)
-            st.markdown('<div class="login-title">🔒 쿡앤셰프 주간 성과보고서</div>', unsafe_allow_html=True)
+            st.markdown('<div class="report-title" style="border:none; text-align:center;">🔒 쿡앤셰프 주간 성과보고서</div>', unsafe_allow_html=True)
             password = st.text_input("Access Code", type="password", key="password_input", label_visibility="collapsed")
             if password:
                 if password == "cncnews2026":
@@ -103,7 +96,7 @@ def check_password():
                     login_placeholder.empty()
                     st.rerun()
                 else: st.error("🚫 코드가 올바르지 않습니다.")
-            st.markdown('<div class="powered-by">Powered by DWG Inc.</div>', unsafe_allow_html=True)
+            st.markdown('<div style="font-size: 12px; color: #90a4ae; margin-top: 50px; font-weight: 500; text-align: center;">Powered by DWG Inc.</div>', unsafe_allow_html=True)
     return False
 
 if not check_password(): st.stop()
@@ -201,30 +194,23 @@ def load_all_dashboard_data(selected_week):
     else: sel_uv, sel_pv, sel_new = 0, 0, 0
     new_ratio = round((sel_new / sel_uv * 100), 1) if sel_uv > 0 else 0
 
-    # 수정: 일별 데이터 날짜 포맷팅 및 정렬 고정
     df_daily = run_ga4_report(s_dt, e_dt, ["date"], ["activeUsers", "screenPageViews"])
     if not df_daily.empty:
         df_daily = df_daily.rename(columns={'date':'날짜', 'activeUsers':'UV', 'screenPageViews':'PV'})
         df_daily['날짜'] = pd.to_datetime(df_daily['날짜'], format='%Y%m%d').dt.strftime('%m-%d')
         df_daily = df_daily.sort_values('날짜')
     
-    # 수정: 주차별 데이터 연도 구분 및 시간순 정렬
-    def fetch_week_data(week_label, date_str):
-        ws, we = date_str.split(' ~ ')[0].replace('.', '-'), date_str.split(' ~ ')[1].replace('.', '-')
+    def fetch_week_data(wl, ds):
+        ws, we = ds.split(' ~ ')[0].replace('.', '-'), ds.split(' ~ ')[1].replace('.', '-')
         res = run_ga4_report(ws, we, [], ["activeUsers", "screenPageViews"])
         if not res.empty:
-            year_val = ws[:4]
-            week_num = int(re.search(r'\d+', week_label).group())
-            return {
-                '주차': f"{year_val}년 {week_label}", 
-                'UV': int(res['activeUsers'][0]), 
-                'PV': int(res['screenPageViews'][0]),
-                'sort_key': f"{year_val}{week_num:02d}"
-            }
+            y = ws[:4]
+            wn = int(re.search(r'\d+', wl).group())
+            return {'주차': f"{y}년 {wl}", 'UV': int(res['activeUsers'][0]), 'PV': int(res['screenPageViews'][0]), 'sort': f"{y}{wn:02d}"}
         return None
     with concurrent.futures.ThreadPoolExecutor(max_workers=5) as ex:
         results = [f.result() for f in concurrent.futures.as_completed([ex.submit(fetch_week_data, wl, dstr) for wl, dstr in list(WEEK_MAP.items())[:12]]) if f.result()]
-    df_weekly = pd.DataFrame(results).sort_values('sort_key') if results else pd.DataFrame()
+    df_weekly = pd.DataFrame(results).sort_values('sort') if results else pd.DataFrame()
     
     df_pc = run_ga4_report(s_dt, e_dt, ["pagePath"], ["screenPageViews"], limit=10000)
     active_article_count = df_pc[df_pc['pagePath'].str.contains(r'article|news|view', na=False)].shape[0] if not df_pc.empty else 0
@@ -281,13 +267,14 @@ def load_all_dashboard_data(selected_week):
         df_raw_all = df_raw_top[~df_raw_top['pageTitle'].str.contains('쿡앤셰프|Cook&Chef', na=False)].copy()
         df_top10 = df_raw_all.sort_values('screenPageViews', ascending=False).head(10)
         df_top10['순위'] = range(1, len(df_top10)+1)
+        # 중요: 여기서 rename을 통해 컬럼명을 한글화함 (이후 KeyError 방지를 위해 이 이름 사용)
         df_top10 = df_top10.rename(columns={'pageTitle': '제목', 'screenPageViews': '전체조회수', 'activeUsers': '전체방문자수', 'userEngagementDuration': '평균체류시간', 'bounceRate': '이탈률'})
         df_top10['체류시간_fmt'] = df_top10['평균체류시간'].apply(lambda x: f"{int(x)//60}분 {int(x)%60}초")
         df_top10['발행일시'], df_top10['신규방문자비율'] = s_dt, f"{new_ratio}%"
     else: df_top10, df_raw_all = pd.DataFrame(), pd.DataFrame()
     return (sel_uv, sel_pv, df_daily, df_weekly, df_traffic_curr, df_traffic_last, df_region_curr, df_region_last, df_age_curr, df_age_last, df_gender_curr, df_gender_last, df_top10, df_raw_all, new_ratio, search_ratio, active_article_count)
 
-# ----------------- 렌더링 함수들 (하나도 빠짐없이 유지) -----------------
+# ----------------- 렌더링 함수들 (모든 항목 유지) -----------------
 def render_summary(df_weekly, cur_pv, cur_uv, new_ratio, search_ratio, df_daily, active_article_count):
     st.markdown('<div class="section-header-container"><div class="section-header">1. 주간 전체 성과 요약</div></div>', unsafe_allow_html=True)
     kpis = [("활성 기사 수", active_article_count, "건"), ("주간 전체 조회수(PV)", cur_pv, "건"), ("주간 총 방문자수(UV)", cur_uv, "명"), 
@@ -344,7 +331,7 @@ def render_top10_detail(df_top10):
     st.markdown('<div class="section-header-container"><div class="section-header">4. 최근 7일 조회수 TOP 10 기사 상세</div></div>', unsafe_allow_html=True)
     if not df_top10.empty:
         df_p = df_top10.copy()
-        for c in ['전체조회수','전체방문자수','좋아요','댓글']: df_p[c] = df_p[c].apply(lambda x: f"{int(x):,}")
+        # 중요: KeyError 방지를 위해 rename된 '전체조회수' 등의 한글 컬럼명 사용
         st.dataframe(df_p[['순위','카테고리','세부카테고리','제목','작성자','발행일시','전체조회수','전체방문자수','좋아요','댓글','체류시간_fmt','신규방문자비율','이탈률']], use_container_width=True, hide_index=True)
 
 def render_top10_trends(df_top10):
@@ -379,7 +366,7 @@ def render_writer_pen(writers_df):
         df_pen = writers_df[writers_df['필명'] != ''].copy()
         if not df_pen.empty: st.dataframe(df_pen[['순위', '필명', '작성자', '기사수', '총조회수']], use_container_width=True, hide_index=True)
 
-# ----------------- 메인 UI 및 모드 제어 (그대로 유지) -----------------
+# ----------------- 메인 UI 및 모드 제어 -----------------
 if 'print_mode' not in st.session_state: st.session_state['print_mode'] = False
 c1, c2 = st.columns([2, 1])
 with c1: st.markdown('<div class="report-title">📰 쿡앤셰프 주간 성과보고서</div>', unsafe_allow_html=True)
