@@ -1,18 +1,3 @@
-## 📊 요구사항 분석 및 개선 방안
-
-### 1. **TOP 10 기사 분석 기준**
-- **활성기사 기준**: 실제 조회가 발생한 기사들 (현재 구현된 방식)
-- **발행기사 기준**: 신규로 발행된 기사들 중 TOP 10
-- **권장**: 활성기사 기준이 더 의미있는 데이터 제공
-
-### 2. **주요 개선사항**
-- 가로인쇄 레이아웃 및 폰트 크기 증가
-- 기사별 유입경로 상세 분석
-- 프리랜서 기자 평가지표 추가
-- 카테고리 차트 크기 조정
-
-## 🔧 개선된 코드
-
 ```python
 import streamlit as st
 import streamlit.components.v1 as components
@@ -27,14 +12,12 @@ from bs4 import BeautifulSoup
 from datetime import datetime, timedelta
 import random
 
-# 인증 모듈
 from google.oauth2 import service_account 
 from google.analytics.data_v1beta import BetaAnalyticsDataClient
 from google.analytics.data_v1beta.types import (
     DateRange, Dimension, Metric, RunReportRequest, OrderBy
 )
 
-# ----------------- 1. 페이지 설정 (가로 모드) -----------------
 st.set_page_config(
     layout="wide", 
     page_title="쿡앤셰프 주간 성과보고서", 
@@ -42,7 +25,6 @@ st.set_page_config(
     initial_sidebar_state="collapsed"
 )
 
-# ----------------- 2. CSS 스타일 정의 (폰트 크기 증가) -----------------
 COLOR_NAVY = "#1a237e"
 COLOR_RED = "#d32f2f"
 COLOR_GREY = "#78909c"
@@ -50,19 +32,16 @@ COLOR_BG_ACCENT = "#fffcf7"
 CHART_PALETTE = [COLOR_NAVY, COLOR_RED, "#5c6bc0", "#ef5350", "#8d6e63", COLOR_GREY]
 COLOR_GENDER = {'여성': '#d32f2f', '남성': '#1a237e'} 
 
-# 기본 화면 스타일 (폰트 크기 증가)
 CSS = f"""
 <style>
 @import url('https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.8/dist/web/static/pretendard.css');
 body {{ background-color: #ffffff; font-family: 'Pretendard', sans-serif; color: #263238; font-size: 16px; }}
 
-/* 헤더 및 툴바 숨김 */
 header[data-testid="stHeader"] {{ visibility: hidden !important; }}
 [data-testid="stToolbar"] {{ visibility: hidden !important; }}
 .block-container {{ padding-top: 2rem !important; padding-bottom: 5rem; max_width: 1800px; }}
 [data-testid="stSidebar"] {{ display: none; }}
 
-/* 보고서 스타일 (폰트 크기 증가) */
 .report-title {{ font-size: 3.2rem; font-weight: 900; color: {COLOR_NAVY}; border-bottom: 4px solid {COLOR_RED}; padding-bottom: 15px; margin-top: 10px; }}
 .period-info {{ font-size: 1.4rem; font-weight: 700; color: #455a64; margin-top: 10px; }}
 .update-time {{ color: {COLOR_NAVY}; font-weight: 700; font-size: 1.2rem; text-align: right; margin-top: -15px; margin-bottom: 30px; font-family: monospace; }}
@@ -82,7 +61,6 @@ header[data-testid="stHeader"] {{ visibility: hidden !important; }}
 [data-testid="stDataFrame"] tbody td {{ font-size: 1.1rem !important; }}
 .footer-note {{ font-size: 1rem; color: #78909c; margin-top: 50px; border-top: 1px solid #eceff1; padding-top: 15px; text-align: center; }}
 
-/* 툴팁 스타일 */
 .traffic-tooltip {{ background-color: rgba(26, 35, 126, 0.95); color: white; padding: 8px 12px; border-radius: 4px; font-size: 0.9rem; }}
 .tooltip-container {{ position: relative; display: inline-block; }}
 .tooltip-container:hover .traffic-tooltip {{ visibility: visible; opacity: 1; }}
@@ -91,7 +69,6 @@ header[data-testid="stHeader"] {{ visibility: hidden !important; }}
 """
 st.markdown(CSS, unsafe_allow_html=True)
 
-# 가로 인쇄 모드 전용 스타일 (수정됨)
 PRINT_CSS = """
 <style>
 .print-preview-layout {
@@ -143,7 +120,6 @@ PRINT_CSS = """
         color: #999;
     }
     
-    /* 가로 인쇄 최적화 */
     .kpi-container { height: 140px !important; }
     .section-header { font-size: 1.8rem !important; }
     .sub-header { font-size: 1.4rem !important; }
@@ -152,7 +128,6 @@ PRINT_CSS = """
 """
 st.markdown(PRINT_CSS, unsafe_allow_html=True)
 
-# ----------------- 3. 진입 보안 화면 (로그인) -----------------
 def check_password():
     if st.session_state.get("password_correct", False):
         return True
@@ -189,13 +164,8 @@ def check_password():
 if not check_password():
     st.stop()
 
-# =================================================================
-# ▼ 메인 로직 시작 ▼
-# =================================================================
-
 PROPERTY_ID = "370663478" 
 
-# ----------------- GA4 및 데이터 처리 함수 -----------------
 @st.cache_resource
 def get_ga4_client():
     try:
@@ -212,15 +182,12 @@ def clean_author_name(name):
     return ' '.join(name.split())
 
 def get_publish_date_from_path(url_path):
-    """URL 패스에서 발행일시 추출"""
     try:
-        # URL 패턴에서 날짜 정보 추출 (예: /2024/01/15/article-title)
         date_match = re.search(r'/(\d{4})/(\d{1,2})/(\d{1,2})/', url_path)
         if date_match:
             year, month, day = date_match.groups()
             return f"{year}-{month.zfill(2)}-{day.zfill(2)}"
         
-        # ID 기반 추정 (최근 7일 내 발행으로 가정)
         return (datetime.now() - timedelta(days=random.randint(1, 7))).strftime('%Y-%m-%d')
     except:
         return datetime.now().strftime('%Y-%m-%d')
@@ -231,7 +198,6 @@ def crawl_single_article(url_path):
         response = requests.get(full_url, timeout=2)
         soup = BeautifulSoup(response.text, 'html.parser')
         
-        # 작성자 정보
         author = "관리자"
         author_tag = soup.select_one('.user-name') or soup.select_one('.writer') or soup.select_one('.byline')
         if author_tag: author = author_tag.text.strip()
@@ -242,7 +208,6 @@ def crawl_single_article(url_path):
                     author = txt; break
         author = clean_author_name(author)
         
-        # 발행일시 추출
         publish_date = get_publish_date_from_path(url_path)
         date_tag = soup.select_one('.date') or soup.select_one('.publish-date') or soup.select_one('time')
         if date_tag:
@@ -253,11 +218,9 @@ def crawl_single_article(url_path):
             except:
                 pass
         
-        # 기타 정보
         likes = int(soup.select_one('.sns-like-count').text.replace(',', '')) if soup.select_one('.sns-like-count') else 0
         comments = int(soup.select_one('.comment-count').text.replace(',', '')) if soup.select_one('.comment-count') else 0
         
-        # 카테고리 정보
         cat, subcat = "뉴스", "이슈"
         breadcrumbs = soup.select('.location a') or soup.select('.breadcrumb a') or soup.select('.path a')
         if breadcrumbs:
@@ -306,18 +269,16 @@ def run_ga4_report(start_date, end_date, dimensions, metrics, order_by_metric=No
                 row_dict[met] = float(val) if '.' in val else int(val)
             data.append(row_dict)
         return pd.DataFrame(data)
-    except: return pd.DataFrame(columns=dimensions + metrics)
+    except: 
+        return pd.DataFrame(columns=dimensions + metrics)
 
-# 기사별 유입경로 분석 함수 추가
 def get_article_traffic_sources(start_date, end_date, page_paths):
-    """기사별 유입경로 상세 분석"""
     client = get_ga4_client()
     if not client or not page_paths: return pd.DataFrame()
     
-    # 각 기사별로 유입경로 분석
     article_traffic = []
     
-    for path in page_paths[:20]:  # 상위 20개 기사만 분석
+    for path in page_paths[:20]: 
         traffic_data = run_ga4_report(start_date, end_date, 
                                     ["pagePath", "sessionSource"], 
                                     ["screenPageViews"], 
@@ -337,7 +298,6 @@ def get_article_traffic_sources(start_date, end_date, page_paths):
     return pd.DataFrame(article_traffic)
 
 def map_traffic_source(source):
-    """유입경로 매핑 함수"""
     source = source.lower()
     if 'naver' in source: return '네이버'
     if 'daum' in source: return '다음'
@@ -353,9 +313,8 @@ def map_traffic_source(source):
 def create_donut_chart_with_val(df, names, values, color_map=None, size='normal'):
     if df.empty: return go.Figure()
     
-    # 크기 조정
     if size == 'small':
-        height, margin_dict = 280, dict(t=20, b=60, l=30, r=30)
+        height, margin_dict = 250, dict(t=15, b=50, l=25, r=25)
     else:
         height, margin_dict = 350, dict(t=30, b=80, l=40, r=40)
     
@@ -375,23 +334,18 @@ def create_donut_chart_with_val(df, names, values, color_map=None, size='normal'
     
     return fig
 
-# 프리랜서 기자 평가 함수
 def evaluate_freelancer_performance(writers_df, df_all_articles):
-    """프리랜서 기자 성과 평가"""
     if writers_df.empty: return pd.DataFrame()
     
-    # 프리랜서 기자 목록 (실제 데이터에 맞게 수정 필요)
     freelancers = ['맛객', '이경엽', 'Chef J', '조용수', '푸드헌터', '김철호', 'Dr.Kim', '안정미']
     
     freelancer_data = []
     for _, writer in writers_df.iterrows():
         if any(fl in writer['작성자'] for fl in freelancers):
-            # 평가 지표 계산
             avg_views = writer['평균조회수']
             total_articles = writer['기사수']
             engagement_score = (writer['좋아요'] + writer['댓글'] * 2) / total_articles if total_articles > 0 else 0
             
-            # 등급 산정
             if avg_views >= 1000: grade = 'S'
             elif avg_views >= 700: grade = 'A'
             elif avg_views >= 500: grade = 'B'
@@ -409,7 +363,6 @@ def evaluate_freelancer_performance(writers_df, df_all_articles):
     
     return pd.DataFrame(freelancer_data).sort_values('평균조회수', ascending=False)
 
-# 데이터 로딩 함수 (수정됨)
 @st.cache_data(ttl=3600, show_spinner="데이터 불러오는 중...")
 def load_all_dashboard_data(selected_week):
     dr = WEEK_MAP[selected_week]
@@ -417,6 +370,104 @@ def load_all_dashboard_data(selected_week):
     ls_dt = (datetime.strptime(s_dt, '%Y-%m-%d')-timedelta(days=7)).strftime('%Y-%m-%d')
     le_dt = (datetime.strptime(e_dt, '%Y-%m-%d')-timedelta(days=7)).strftime('%Y-%m-%d')
 
-    # 1. KPI
-    summary
+    # KPI
+    summary = run_ga4_report(s_dt, e_dt, [], ["activeUsers", "screenPageViews", "newUsers"])
+    if not summary.empty:
+        sel_uv = int(summary['activeUsers'].iloc[0])
+        sel_pv = int(summary['screenPageViews'].iloc[0])
+        sel_new = int(summary['newUsers'].iloc[0])
+    else: sel_uv, sel_pv, sel_new = 0, 0, 0
+    new_visitor_ratio = round((sel_new / sel_uv * 100), 1) if sel_uv > 0 else 0
 
+    # 일별 데이터
+    df_daily = run_ga4_report(s_dt, e_dt, ["date"], ["activeUsers", "screenPageViews"])
+    if not df_daily.empty:
+        df_daily = df_daily.rename(columns={'date':'날짜', 'activeUsers':'UV', 'screenPageViews':'PV'})
+        df_daily['날짜'] = pd.to_datetime(df_daily['날짜']).dt.strftime('%m-%d')
+    
+    # 3개월 추이
+    def fetch_week_data(week_label, date_str):
+        ws, we = date_str.split(' ~ ')[0].replace('.', '-'), date_str.split(' ~ ')[1].replace('.', '-')
+        res = run_ga4_report(ws, we, [], ["activeUsers", "screenPageViews"])
+        if not res.empty:
+            return {
+                '주차': week_label, 
+                'UV': int(res['activeUsers'][0]), 
+                'PV': int(res['screenPageViews'][0])
+            }
+        return None
+
+    with concurrent.futures.ThreadPoolExecutor(max_workers=5) as executor:
+        futures = [executor.submit(fetch_week_data, wl, dstr) for wl, dstr in list(WEEK_MAP.items())[:12]]
+        results = [f.result() for f in concurrent.futures.as_completed(futures) if f.result()]
+    
+    df_weekly = pd.DataFrame(results)
+    if not df_weekly.empty:
+        df_weekly['week_num'] = df_weekly['주차'].apply(lambda x: int(re.search(r'\d+', x).group()))
+        df_weekly = df_weekly.sort_values('week_num')
+    
+    # 활성 기사 수
+    df_pages_count = run_ga4_report(s_dt, e_dt, ["pagePath"], ["screenPageViews"], limit=10000)
+    if not df_pages_count.empty:
+        mask_article = df_pages_count['pagePath'].str.contains(r'article|news|view|story', case=False, regex=True, na=False)
+        active_article_count = df_pages_count[mask_article].shape[0]
+        if active_article_count == 0:
+             active_article_count = df_pages_count[df_pages_count['pagePath'].str.len() > 1].shape[0]
+    else:
+        active_article_count = 0
+
+    # 유입경로
+    df_t_raw = run_ga4_report(s_dt, e_dt, ["sessionSource"], ["screenPageViews"])
+    df_t_raw['유입경로'] = df_t_raw['sessionSource'].apply(map_traffic_source)
+    df_traffic_curr = df_t_raw.groupby('유입경로')['screenPageViews'].sum().reset_index().rename(columns={'screenPageViews':'조회수'})
+    
+    search_engines = ['네이버', '구글', '다음']
+    search_pv = df_traffic_curr[df_traffic_curr['유입경로'].isin(search_engines)]['조회수'].sum()
+    total_pv_traffic = df_traffic_curr['조회수'].sum()
+    search_inflow_ratio = round((search_pv / total_pv_traffic * 100), 1) if total_pv_traffic > 0 else 0
+    
+    df_tl_raw = run_ga4_report(ls_dt, le_dt, ["sessionSource"], ["screenPageViews"])
+    df_tl_raw['유입경로'] = df_tl_raw['sessionSource'].apply(map_traffic_source)
+    df_traffic_last = df_tl_raw.groupby('유입경로')['screenPageViews'].sum().reset_index().rename(columns={'screenPageViews':'조회수'})
+
+    # 방문자 특성
+    def clean_and_group(df, col_name):
+        if df.empty: return pd.DataFrame(columns=['구분', 'activeUsers'])
+        df['구분'] = df[col_name].replace({'(not set)': '기타', '': '기타', 'unknown': '기타'}).fillna('기타')
+        return df.groupby('구분', as_index=False)['activeUsers'].sum()
+
+    region_map = {'Seoul':'서울','Gyeonggi-do':'경기','Incheon':'인천','Busan':'부산','Daegu':'대구','Gyeongsangnam-do':'경남','Gyeongsangbuk-do':'경북','Chungcheongnam-do':'충남','Chungcheongbuk-do':'충북','Jeollanam-do':'전남','Jeollabuk-do':'전북','Gangwon-do':'강원','Daejeon':'대전','Gwangju':'광주','Ulsan':'울산','Jeju-do':'제주','Sejong-si':'세종'}
+    
+    with concurrent.futures.ThreadPoolExecutor(max_workers=6) as executor:
+        f_reg_c = executor.submit(run_ga4_report, s_dt, e_dt, ["region"], ["activeUsers"], "activeUsers", 50)
+        f_reg_l = executor.submit(run_ga4_report, ls_dt, le_dt, ["region"], ["activeUsers"], "activeUsers", 50)
+        f_age_c = executor.submit(run_ga4_report, s_dt, e_dt, ["userAgeBracket"], ["activeUsers"], "activeUsers")
+        f_age_l = executor.submit(run_ga4_report, ls_dt, le_dt, ["userAgeBracket"], ["activeUsers"], "activeUsers")
+        f_gen_c = executor.submit(run_ga4_report, s_dt, e_dt, ["userGender"], ["activeUsers"], "activeUsers")
+        f_gen_l = executor.submit(run_ga4_report, ls_dt, le_dt, ["userGender"], ["activeUsers"], "activeUsers")
+
+        d_rc, d_rl = f_reg_c.result(), f_reg_l.result()
+        if not d_rc.empty: d_rc['region_mapped'] = d_rc['region'].map(region_map).fillna('기타')
+        if not d_rl.empty: d_rl['region_mapped'] = d_rl['region'].map(region_map).fillna('기타')
+        df_region_curr = clean_and_group(d_rc, 'region_mapped')
+        df_region_last = clean_and_group(d_rl, 'region_mapped')
+
+        d_ac, d_al = f_age_c.result(), f_age_l.result()
+        for df in [d_ac, d_al]:
+            if not df.empty:
+                df['temp_age'] = df['userAgeBracket'].replace({'unknown': '기타', '(not set)': '기타'})
+                df['구분'] = df['temp_age'].apply(lambda x: x + '세' if x != '기타' else x)
+        df_age_curr = d_ac[d_ac['구분'] != '기타'].groupby('구분', as_index=False)['activeUsers'].sum() if not d_ac.empty else pd.DataFrame()
+        df_age_last = d_al[d_al['구분'] != '기타'].groupby('구분', as_index=False)['activeUsers'].sum() if not d_al.empty else pd.DataFrame()
+
+        d_gc, d_gl = f_gen_c.result(), f_gen_l.result()
+        gender_map = {'male': '남성', 'female': '여성'}
+        for df in [d_gc, d_gl]:
+            if not df.empty:
+                df['mapped'] = df['userGender'].map(gender_map)
+                df['구분'] = df['mapped']
+        df_gender_curr = d_gc.dropna(subset=['mapped']).groupby('구분', as_index=False)['activeUsers'].sum() if not d_gc.empty else pd.DataFrame()
+        df_gender_last = d_gl.dropna(subset=['mapped']).groupby('구분', as_index=False)['activeUsers'].sum() if not d_gl.empty else pd.DataFrame()
+
+    # TOP 10 크롤링
+    df_raw_top = run_ga4_report(s
