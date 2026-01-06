@@ -1,4 +1,3 @@
-```python
 import streamlit as st
 import streamlit.components.v1 as components
 import pandas as pd
@@ -471,3 +470,4 @@ def load_all_dashboard_data(selected_week):
 
     # TOP 10 크롤링
     df_raw_top = run_ga4_report(s
+
